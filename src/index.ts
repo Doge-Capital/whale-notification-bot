@@ -2,9 +2,10 @@ import { configDotenv } from "dotenv";
 import { Telegraf } from "telegraf";
 import connectToDatabase from "./utils/database";
 import Token from "./models/token";
+import listener from "./utils/listener";
 configDotenv();
 
-const bot = new Telegraf(process.env.BOT_TOKEN!);
+export const bot = new Telegraf(process.env.BOT_TOKEN!);
 
 // Respond to /start command
 bot.start((ctx) => {
@@ -26,7 +27,7 @@ bot.command("register", async (ctx) => {
   const params = messageText.split(" ");
 
   if (params.length !== 3) {
-    await ctx.reply("Usage: /register <token> <min_value>");
+    await ctx.reply("Usage: /register <token_mint> <min_value>");
     return;
   }
 
@@ -49,7 +50,7 @@ bot.command("register", async (ctx) => {
       minValue,
     });
     await ctx.reply(
-      `Registered token: ${token}, with minimum value: ${minValue} in group: ${groupId}`
+      `Registered token: ${token}, with minimum value: ${minValue}`
     );
   } catch (err: any) {
     if (err.code === 11000) {
@@ -62,6 +63,8 @@ bot.command("register", async (ctx) => {
     return;
   }
 });
+
+listener();
 
 // Error handling
 bot.catch((err) => {
