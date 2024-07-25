@@ -77,13 +77,11 @@ bot.command("register", async (ctx) => {
       minValue,
     });
 
-    if (subcriptionIds[tokenMint] != null)
+    if (subcriptionIds[tokenMint] == null)
       subcriptionIds[tokenMint] = connection.onLogs(
         new PublicKey(tokenMint),
         callback
       );
-
-    console.log(subcriptionIds);
 
     await ctx.reply(
       `Registered token: ${tokenMint}, with minimum value: ${minValue}`
@@ -128,8 +126,6 @@ bot.command("unregister", async (ctx) => {
 
     const token = await Token.findOne({ tokenMint });
     if (!token) connection.removeOnLogsListener(subcriptionIds[tokenMint]);
-
-    console.log(subcriptionIds);
   } catch (err: any) {
     await ctx.reply("An error occurred while unregistering the token.");
   }
