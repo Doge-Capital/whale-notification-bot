@@ -2,24 +2,27 @@ import { bot } from "..";
 import Token from "../models/token";
 import TxnSignature from "../models/txnSignature";
 import connectToDatabase from "./database";
+import fs from "fs";
+
+const dexscreenerUrl = "https://dexscreener.com/solana/";
+const jupiterUrl = "https://jup.ag/swap/USDC-";
+const txnUrl = "https://solscan.io/tx/";
+const buyerUrl = "https://solscan.io/account/";
 
 const callback = async (data: any) => {
   try {
     const txnSignature = data.signature;
-    // console.log("Transaction signature:", txnSignature);
+    //append txnSignature to a file
+    // fs.appendFileSync("txnSignatures.txt", txnSignature + "\n");
 
     await connectToDatabase();
     try {
       await TxnSignature.create({ txnSignature });
     } catch (error: any) {
-      if (error.code === 11000) console.log("Duplicate txnSignature");
-      else console.log(txnSignature, error.message);
+      if (error.code !== 11000) console.log(txnSignature, error.message);
       return;
     }
 
-    console.log("---------------------------------------");
-    console.log(txnSignature);
-    console.log("---------------------------------------");
     const signer = data.feePayer;
 
     const tokenChanges: Record<string, number> = {};
@@ -49,12 +52,14 @@ const callback = async (data: any) => {
         continue;
       }
 
-      await bot.telegram.sendMessage(
-        listeningGroup.groupId,
-        `Token: ${tokenMint}\nChanged: ${tokenChange.toFixed(
+      const { groupId, image, name, symbol } = listeningGroup;
+
+      await bot.telegram.sendPhoto(groupId, image, {
+        caption: `*${name} BUY!*\nGot: *${tokenChange.toFixed(
           2
-        )}\nTransaction: ${txnSignature}\nSource: ${data.source}`
-      );
+        )} ${symbol}*\n[Buyer](${buyerUrl}${signer}) / [Txn](${txnUrl}${txnSignature})\n\n[BUY](${jupiterUrl}${txnSignature}) | [Dexscreener](${dexscreenerUrl}${txnSignature})`,
+        parse_mode: "Markdown",
+      });
     }
     return;
   } catch (error: any) {

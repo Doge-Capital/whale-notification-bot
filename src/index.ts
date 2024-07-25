@@ -6,6 +6,7 @@ import Token from "./models/token";
 import connectToDatabase from "./utils/database";
 import callback from "./utils/listenerCallback";
 import express from "express";
+import { Metaplex } from "@metaplex-foundation/js";
 configDotenv();
 
 export const bot = new Telegraf(process.env.BOT_TOKEN!);
@@ -69,10 +70,26 @@ bot.command("register", async (ctx) => {
     return;
   }
 
+  const mintAddress = new PublicKey(tokenMint);
+  const metaplex = Metaplex.make(connection);
+
   try {
-    const accInfo = await connection.getAccountInfo(new PublicKey(tokenMint));
+    const accInfo = await connection.getAccountInfo(mintAddress);
     if (!accInfo?.owner.equals(TOKEN_PROGRAM_ID)) {
       await ctx.reply("Please provide a valid token mint address.");
+      return;
+    }
+
+    const metadataAccount = metaplex
+      .nfts()
+      .pdas()
+      .metadata({ mint: mintAddress });
+
+    const metadataAccountInfo = await connection.getAccountInfo(
+      metadataAccount
+    );
+    if (!metadataAccountInfo) {
+      await ctx.reply("Metadata account info not found.");
       return;
     }
   } catch (error: any) {
@@ -85,9 +102,17 @@ bot.command("register", async (ctx) => {
   const groupId = ctx.chat.id;
 
   try {
+    const token = await metaplex.nfts().findByMint({ mintAddress });
+    const name = token.name;
+    const symbol = token.symbol;
+    const image = token.json!.image;
+
     await Token.create({
       groupId,
       tokenMint,
+      name,
+      symbol,
+      image,
       minValue,
     });
 
