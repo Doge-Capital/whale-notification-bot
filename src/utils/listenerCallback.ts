@@ -12,13 +12,14 @@ const callback = async (data: any) => {
     try {
       await TxnSignature.create({ txnSignature });
     } catch (error: any) {
-      if (error.code !== 11000) console.log(txnSignature, error.message);
+      if (error.code === 11000) console.log("Duplicate txnSignature");
+      else console.log(txnSignature, error.message);
       return;
     }
 
-    console.log('---------------------------------------');
-    console.log(data.events);
-    console.log('---------------------------------------');
+    console.log("---------------------------------------");
+    console.log(txnSignature);
+    console.log("---------------------------------------");
     const signer = data.feePayer;
 
     const tokenChanges: Record<string, number> = {};
@@ -50,9 +51,9 @@ const callback = async (data: any) => {
 
       await bot.telegram.sendMessage(
         listeningGroup.groupId,
-        `Token: ${tokenMint} has changed by ${tokenChange.toFixed(
+        `Token: ${tokenMint}\nChanged: ${tokenChange.toFixed(
           2
-        )} in transaction: ${txnSignature}`
+        )}\nTransaction: ${txnSignature}\nSource: ${data.source}`
       );
     }
     return;
