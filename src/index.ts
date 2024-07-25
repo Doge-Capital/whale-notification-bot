@@ -21,9 +21,9 @@ app.listen(PORT, () => {
 
 app.use(express.json());
 
-app.post("/webhook", async (req, res) => {
+app.post("/webhook", async (req: any, res: any) => {
   const data = req.body;
-  callback(data[0])
+  callback(data[0]);
 });
 
 bot.start((ctx) => {
