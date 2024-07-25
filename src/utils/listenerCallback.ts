@@ -10,7 +10,7 @@ const callback = async (data: any) => {
     try {
       await TxnSignature.create({ txnSignature });
     } catch (error: any) {
-      if (error.code !== 11000) console.log();
+      if (error.code !== 11000) console.log(txnSignature, error.message);
       return;
     }
 
