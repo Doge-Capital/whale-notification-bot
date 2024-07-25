@@ -23,9 +23,6 @@ app.use(express.json());
 
 app.post("/webhook", async (req: any, res: any) => {
   const data = req.body;
-  console.log("----------------------------------------------------------");
-  console.log(data);
-  console.log("----------------------------------------------------------");
   callback(data[0]);
 });
 

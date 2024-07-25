@@ -1,12 +1,14 @@
 import { bot } from "..";
 import Token from "../models/token";
 import TxnSignature from "../models/txnSignature";
+import connectToDatabase from "./database";
 
 const callback = async (data: any) => {
   try {
     const txnSignature = data.signature;
     // console.log("Transaction signature:", txnSignature);
 
+    await connectToDatabase();
     try {
       await TxnSignature.create({ txnSignature });
     } catch (error: any) {
