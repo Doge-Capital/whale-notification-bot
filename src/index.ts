@@ -20,6 +20,24 @@ bot.start((ctx) => {
   }
 });
 
+bot.command("list", async (ctx) => {
+  await connectToDatabase();
+
+  const tokens = await Token.find({ groupId: ctx.chat.id });
+
+  if (tokens.length === 0) {
+    await ctx.reply("No tokens have been registered for this group.");
+    return;
+  }
+
+  let message = "Registered tokens:\n";
+  tokens.forEach((token) => {
+    message += `Token: ${token.tokenMint}, Minimum Value: ${token.minValue}\n`;
+  });
+
+  await ctx.reply(message);
+});
+
 bot.command("register", async (ctx) => {
   const messageText = ctx.message.text;
   const params = messageText.split(" ");
@@ -59,10 +77,11 @@ bot.command("register", async (ctx) => {
       minValue,
     });
 
-    subcriptionIds[tokenMint] = connection.onLogs(
-      new PublicKey(tokenMint),
-      callback
-    );
+    if (!subcriptionIds[tokenMint])
+      subcriptionIds[tokenMint] = connection.onLogs(
+        new PublicKey(tokenMint),
+        callback
+      );
 
     await ctx.reply(
       `Registered token: ${tokenMint}, with minimum value: ${minValue}`
@@ -97,8 +116,6 @@ bot.command("unregister", async (ctx) => {
       tokenMint,
     });
 
-    connection.removeOnLogsListener(subcriptionIds[tokenMint]);
-
     if (result.deletedCount === 0) {
       await ctx.reply(
         `Token: ${tokenMint} has not been registered for this group.`
@@ -106,6 +123,9 @@ bot.command("unregister", async (ctx) => {
     } else {
       await ctx.reply(`Unregistered token: ${tokenMint}`);
     }
+
+    const token = await Token.findOne({ tokenMint });
+    if (!token) connection.removeOnLogsListener(subcriptionIds[tokenMint]);
   } catch (err: any) {
     await ctx.reply("An error occurred while unregistering the token.");
   }
