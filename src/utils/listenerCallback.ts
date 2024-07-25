@@ -17,6 +17,7 @@ const callback = async (logs: Logs, context: Context) => {
 
     const info = await connection.getParsedTransaction(txnSignature, {
       maxSupportedTransactionVersion: 0,
+      commitment: "confirmed",
     });
 
     if (!info || !info.meta) return;
