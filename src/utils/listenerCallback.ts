@@ -4,70 +4,79 @@ import Token from "../models/token";
 import TxnSignature from "../models/txnSignature";
 
 const callback = async (logs: Logs, context: Context) => {
-  if (logs.err) return;
+  try {
+    if (logs.err) return;
 
-  const txnSignature = logs.signature;
-  await TxnSignature.create({ txnSignature }).catch(() => {
-    return;
-  });
+    const txnSignature = logs.signature;
 
-  const info = await connection.getParsedTransaction(txnSignature, {
-    maxSupportedTransactionVersion: 0,
-  });
+    try {
+      await TxnSignature.create({ txnSignature });
+    } catch (error) {
+      return;
+    }
 
-  if (!info || !info.meta) return;
+    const info = await connection.getParsedTransaction(txnSignature, {
+      maxSupportedTransactionVersion: 0,
+    });
 
-  const preTokenBalances = info.meta.preTokenBalances;
-  const postTokenBalances = info.meta.postTokenBalances;
+    if (!info || !info.meta) return;
 
-  if (!preTokenBalances || !postTokenBalances) return;
+    const preTokenBalances = info.meta.preTokenBalances;
+    const postTokenBalances = info.meta.postTokenBalances;
 
-  const signer = info.transaction.message.accountKeys
-    .find((key) => key.signer)
-    ?.pubkey.toBase58();
+    if (!preTokenBalances || !postTokenBalances) return;
 
-  const tokenChanges: Record<string, number> = {};
+    const signer = info.transaction.message.accountKeys
+      .find((key) => key.signer)
+      ?.pubkey.toBase58();
 
-  for (let i = 0; i < preTokenBalances.length; i++) {
-    const preTokenBalance = preTokenBalances[i];
-    const postTokenBalance = postTokenBalances[i];
+    const tokenChanges: Record<string, number> = {};
 
-    if (!preTokenBalance || !postTokenBalance) continue;
+    for (let i = 0; i < preTokenBalances.length; i++) {
+      const preTokenBalance = preTokenBalances[i];
+      const postTokenBalance = postTokenBalances[i];
 
-    if (preTokenBalance.owner !== signer) continue;
+      if (!preTokenBalance || !postTokenBalance) continue;
 
-    const mint = preTokenBalance.mint;
+      if (preTokenBalance.owner !== signer) continue;
 
-    if (
-      preTokenBalance.uiTokenAmount.uiAmount !==
-      postTokenBalance.uiTokenAmount.uiAmount
-    ) {
-      tokenChanges[mint] = Math.abs(
-        postTokenBalance.uiTokenAmount.uiAmount! -
-          preTokenBalance.uiTokenAmount.uiAmount!
+      const mint = preTokenBalance.mint;
+
+      if (
+        preTokenBalance.uiTokenAmount.uiAmount !==
+        postTokenBalance.uiTokenAmount.uiAmount
+      ) {
+        tokenChanges[mint] = Math.abs(
+          postTokenBalance.uiTokenAmount.uiAmount! -
+            preTokenBalance.uiTokenAmount.uiAmount!
+        );
+      }
+    }
+
+    const listeningGroups = await Token.find({
+      tokenMint: { $in: Object.keys(tokenChanges) },
+    }).lean();
+
+    for (let i = 0; i < listeningGroups.length; i++) {
+      const listeningGroup = listeningGroups[i];
+      const tokenMint = listeningGroup.tokenMint;
+      const tokenChange = tokenChanges[tokenMint];
+
+      if (tokenChange < listeningGroup.minValue) {
+        continue;
+      }
+
+      await bot.telegram.sendMessage(
+        listeningGroup.groupId,
+        `Token: ${tokenMint} has changed by ${tokenChange.toFixed(
+          2
+        )} in transaction: ${txnSignature}`
       );
     }
-  }
-
-  const listeningGroups = await Token.find({
-    tokenMint: { $in: Object.keys(tokenChanges) },
-  }).lean();
-
-  for (let i = 0; i < listeningGroups.length; i++) {
-    const listeningGroup = listeningGroups[i];
-    const tokenMint = listeningGroup.tokenMint;
-    const tokenChange = tokenChanges[tokenMint];
-
-    if (tokenChange < listeningGroup.minValue) {
-      continue;
-    }
-
-    await bot.telegram.sendMessage(
-      listeningGroup.groupId,
-      `Token: ${tokenMint} has changed by ${tokenChange.toFixed(
-        2
-      )} in transaction: ${txnSignature}`
-    );
+    return;
+  } catch (error: any) {
+    console.error(error.message);
+    return;
   }
 };
 
