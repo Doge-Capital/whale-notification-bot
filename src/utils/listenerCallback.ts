@@ -16,6 +16,9 @@ const callback = async (data: any) => {
       return;
     }
 
+    console.log('---------------------------------------');
+    console.log(data.events);
+    console.log('---------------------------------------');
     const signer = data.feePayer;
 
     const tokenChanges: Record<string, number> = {};
