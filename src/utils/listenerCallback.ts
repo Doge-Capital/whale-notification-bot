@@ -8,10 +8,12 @@ const callback = async (logs: Logs, context: Context) => {
     if (logs.err) return;
 
     const txnSignature = logs.signature;
+    console.log("Transaction signature:", txnSignature);
 
     try {
       await TxnSignature.create({ txnSignature });
-    } catch (error) {
+    } catch (error: any) {
+      if (error.code !== 11000) console.log();
       return;
     }
 
@@ -27,9 +29,9 @@ const callback = async (logs: Logs, context: Context) => {
 
     if (!preTokenBalances || !postTokenBalances) return;
 
-    const signer = info.transaction.message.accountKeys
-      .find((key) => key.signer)
-      ?.pubkey.toBase58();
+    const signers = info.transaction.message.accountKeys
+      .filter((key) => key.signer)
+      .map((key) => key.pubkey.toBase58());
 
     const tokenChanges: Record<string, number> = {};
 
@@ -37,9 +39,10 @@ const callback = async (logs: Logs, context: Context) => {
       const preTokenBalance = preTokenBalances[i];
       const postTokenBalance = postTokenBalances[i];
 
-      if (!preTokenBalance || !postTokenBalance) continue;
+      if (!preTokenBalance || !postTokenBalance || !preTokenBalance.owner)
+        continue;
 
-      if (preTokenBalance.owner !== signer) continue;
+      if (!signers.includes(preTokenBalance.owner)) continue;
 
       const mint = preTokenBalance.mint;
 
@@ -53,6 +56,7 @@ const callback = async (logs: Logs, context: Context) => {
         );
       }
     }
+    // console.log("Token changes:", tokenChanges, txnSignature);
 
     const listeningGroups = await Token.find({
       tokenMint: { $in: Object.keys(tokenChanges) },
