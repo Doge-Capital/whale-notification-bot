@@ -25,7 +25,10 @@ const callback = async (data: any) => {
 
     const signer = data.feePayer;
 
-    const tokenChanges: Record<string, number> = {};
+    const tokenChanges: Record<
+      string,
+      { isNewHolder: boolean; amount: number; buyOrSell: string }
+    > = {};
 
     for (let i = 0; i < data.tokenTransfers.length; i++) {
       const fromUser = data.tokenTransfers[i].fromUserAccount;
@@ -33,9 +36,24 @@ const callback = async (data: any) => {
 
       const mint = data.tokenTransfers[i].mint;
 
-      if (fromUser === signer || toUser === signer) {
-        tokenChanges[mint] = Math.abs(data.tokenTransfers[i].tokenAmount);
-      }
+      if (fromUser !== signer && toUser !== signer) continue;
+
+      const buyOrSell = toUser === signer ? "BUY" : "SELL";
+
+      const ata =
+        fromUser === signer
+          ? data.tokenTransfers[i].fromTokenAccount
+          : data.tokenTransfers[i].toTokenAccount;
+
+      const isNewHolder = data.nativeTransfers.some(
+        (transfer: any) => transfer.toUserAccount === ata && transfer.amount > 0
+      );
+
+      tokenChanges[mint] = {
+        isNewHolder,
+        amount: Math.abs(data.tokenTransfers[i].tokenAmount),
+        buyOrSell,
+      };
     }
     // console.log("Token changes:", tokenChanges, txnSignature);
 
@@ -48,16 +66,18 @@ const callback = async (data: any) => {
       const tokenMint = listeningGroup.tokenMint;
       const tokenChange = tokenChanges[tokenMint];
 
-      if (tokenChange < listeningGroup.minValue) {
+      if (tokenChange.amount < listeningGroup.minValue) {
         continue;
       }
 
       const { groupId, image, name, symbol } = listeningGroup;
 
       await bot.telegram.sendPhoto(groupId, image, {
-        caption: `*${name} BUY!*\nGot: *${tokenChange.toFixed(
-          2
-        )} ${symbol}*\n[Buyer](${buyerUrl}${signer}) / [Txn](${txnUrl}${txnSignature})\n\n[BUY](${jupiterUrl}${txnSignature}) | [Dexscreener](${dexscreenerUrl}${txnSignature})`,
+        caption: `*${name} ${
+          tokenChange.buyOrSell
+        }!*\nGot: *${tokenChange.amount.toFixed(2)} ${symbol}*\n${
+          tokenChange.isNewHolder ? "New Holder" : "Existing Holder"
+        }\n[Buyer](${buyerUrl}${signer}) / [Txn](${txnUrl}${txnSignature})\n\n[Buy](${jupiterUrl}${txnSignature}) | [Dexscreener](${dexscreenerUrl}${txnSignature})`,
         parse_mode: "Markdown",
       });
     }
