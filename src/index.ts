@@ -5,12 +5,26 @@ import { Telegraf } from "telegraf";
 import Token from "./models/token";
 import connectToDatabase from "./utils/database";
 import callback from "./utils/listenerCallback";
+import express from "express";
 configDotenv();
 
 export const bot = new Telegraf(process.env.BOT_TOKEN!);
 export const connection = new Connection(process.env.BACKEND_RPC!);
 
-export const subcriptionIds: Record<string, number> = {};
+const app = express();
+
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
+});
+
+app.use(express.json());
+
+app.post("/webhook", async (req, res) => {
+  const data = req.body;
+  callback(data[0])
+});
 
 bot.start((ctx) => {
   if (ctx.chat.type === "private") {
@@ -77,14 +91,6 @@ bot.command("register", async (ctx) => {
       minValue,
     });
 
-    if (subcriptionIds[tokenMint] == null)
-      subcriptionIds[tokenMint] = connection.onLogs(
-        new PublicKey(tokenMint),
-        callback
-      );
-
-    console.log("subcriptionIds", subcriptionIds);
-
     await ctx.reply(
       `Registered token: ${tokenMint}, with minimum value: ${minValue}`
     );
@@ -125,33 +131,10 @@ bot.command("unregister", async (ctx) => {
     } else {
       await ctx.reply(`Unregistered token: ${tokenMint}`);
     }
-
-    const token = await Token.findOne({ tokenMint });
-    if (!token) connection.removeOnLogsListener(subcriptionIds[tokenMint]);
-
-    console.log("subcriptionIds", subcriptionIds);
   } catch (err: any) {
     await ctx.reply("An error occurred while unregistering the token.");
   }
 });
-
-const listener = async () => {
-  await connectToDatabase();
-
-  const listenedTokens = await Token.find().distinct("tokenMint");
-
-  console.log("Listening to tokens: ", listenedTokens);
-  for (let i = 0; i < listenedTokens.length; i++) {
-    const tokenMint = listenedTokens[i];
-    subcriptionIds[tokenMint] = connection.onLogs(
-      new PublicKey(tokenMint),
-      callback,
-      "finalized"
-    );
-  }
-};
-
-listener();
 
 bot.catch((err) => {
   console.error("Error occurred", err);

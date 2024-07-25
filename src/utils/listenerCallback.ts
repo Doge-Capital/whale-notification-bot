@@ -1,14 +1,11 @@
-import { Context, Logs } from "@solana/web3.js";
-import { bot, connection } from "..";
+import { bot } from "..";
 import Token from "../models/token";
 import TxnSignature from "../models/txnSignature";
 
-const callback = async (logs: Logs, context: Context) => {
+const callback = async (data: any) => {
   try {
-    if (logs.err) return;
-
-    const txnSignature = logs.signature;
-    console.log("Transaction signature:", txnSignature);
+    const txnSignature = data.signature;
+    // console.log("Transaction signature:", txnSignature);
 
     try {
       await TxnSignature.create({ txnSignature });
@@ -17,43 +14,18 @@ const callback = async (logs: Logs, context: Context) => {
       return;
     }
 
-    const info = await connection.getParsedTransaction(txnSignature, {
-      maxSupportedTransactionVersion: 0,
-      commitment: "confirmed",
-    });
-
-    if (!info || !info.meta) return;
-
-    const preTokenBalances = info.meta.preTokenBalances;
-    const postTokenBalances = info.meta.postTokenBalances;
-
-    if (!preTokenBalances || !postTokenBalances) return;
-
-    const signers = info.transaction.message.accountKeys
-      .filter((key) => key.signer)
-      .map((key) => key.pubkey.toBase58());
+    const signer = data.feePayer;
 
     const tokenChanges: Record<string, number> = {};
 
-    for (let i = 0; i < preTokenBalances.length; i++) {
-      const preTokenBalance = preTokenBalances[i];
-      const postTokenBalance = postTokenBalances[i];
+    for (let i = 0; i < data.tokenTransfers.length; i++) {
+      const fromUser = data.tokenTransfers[i].fromUserAccount;
+      const toUser = data.tokenTransfers[i].toUserAccount;
 
-      if (!preTokenBalance || !postTokenBalance || !preTokenBalance.owner)
-        continue;
+      const mint = data.tokenTransfers[i].mint;
 
-      if (!signers.includes(preTokenBalance.owner)) continue;
-
-      const mint = preTokenBalance.mint;
-
-      if (
-        preTokenBalance.uiTokenAmount.uiAmount !==
-        postTokenBalance.uiTokenAmount.uiAmount
-      ) {
-        tokenChanges[mint] = Math.abs(
-          postTokenBalance.uiTokenAmount.uiAmount! -
-            preTokenBalance.uiTokenAmount.uiAmount!
-        );
+      if (fromUser === signer || toUser === signer) {
+        tokenChanges[mint] = Math.abs(data.tokenTransfers[i].tokenAmount);
       }
     }
     // console.log("Token changes:", tokenChanges, txnSignature);
