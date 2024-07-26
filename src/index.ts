@@ -10,7 +10,6 @@ import { Metaplex } from "@metaplex-foundation/js";
 configDotenv();
 
 export const bot = new Telegraf(process.env.BOT_TOKEN!);
-export const connection = new Connection(process.env.BACKEND_RPC!);
 
 const app = express();
 
@@ -71,6 +70,8 @@ bot.command("register", async (ctx) => {
   }
 
   const mintAddress = new PublicKey(tokenMint);
+
+  const connection = new Connection(process.env.BACKEND_RPC!);
   const metaplex = Metaplex.make(connection);
 
   try {
