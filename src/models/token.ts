@@ -27,10 +27,11 @@ const tokenSchema = new mongoose.Schema(
       required: true,
     },
     minValueEmojis: {
-      type: [String],
+      type: String,
       required: true,
+      default: "🟢🟢🟢🟢🟢🟢"
     },
-    dexTUrl: {
+    poolAddress: {
       type: String,
       required: true,
     },

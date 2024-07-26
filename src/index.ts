@@ -224,6 +224,23 @@ bot.command("register", async (ctx) => {
     const symbol = token.symbol;
     const image = token.json!.image;
 
+    const meteoraPools: any = await fetch(
+      "https://dlmm-api.meteora.ag/pair/all"
+    ).then((res) => res.json());
+
+    const tokenPools = meteoraPools.filter(
+      (p: any) => p.mint_x === tokenMint || p.mint_y === tokenMint
+    );
+    //get pool with highest liquidity
+    const pool = tokenPools.reduce((prev: any, current: any) => {
+      return prev.liquidity > current.liquidity ? prev : current;
+    });
+
+    if (!pool) {
+      await ctx.reply("No pool found for this token.");
+      return;
+    }
+
     await Token.create({
       groupId,
       tokenMint,
@@ -231,6 +248,7 @@ bot.command("register", async (ctx) => {
       symbol,
       image,
       minValue,
+      poolAddress: pool.address,
     });
 
     await ctx.reply(

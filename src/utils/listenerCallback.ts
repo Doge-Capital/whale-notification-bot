@@ -10,6 +10,8 @@ const dexscreenerUrl = "https://dexscreener.com/solana/";
 const jupiterUrl = "https://jup.ag/swap/USDC-";
 const txnUrl = "https://solscan.io/tx/";
 const buyerUrl = "https://solscan.io/account/";
+const dexTUrl = "https://www.dextools.io/app/en/solana/pair-explorer/";
+const solTrendingUrl = "https://t.me/SOLTRENDING";
 
 const getTokenInfo = async (tokenMint: string) => {
   const connection = new Connection(process.env.BACKEND_RPC!);
@@ -90,7 +92,7 @@ const callback = async (data: any) => {
       const preTokenAmount = preTokenBalance?.uiTokenAmount?.uiAmount ?? 0;
       const postTokenAmount = postTokenBalance.uiTokenAmount.uiAmount;
 
-      if (postTokenAmount === preTokenAmount) continue;
+      if (preTokenAmount >= postTokenAmount) continue;
 
       const isNewHolder = preTokenAmount === 0;
       const amount = Math.abs(postTokenAmount - preTokenAmount);
@@ -102,9 +104,6 @@ const callback = async (data: any) => {
         positionIncrease,
       };
     }
-
-    // if (tokenChanges["JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN"])
-    //   console.log("Token changes:", tokenChanges, txnSignature);
 
     const listeningGroups = await Token.find({
       tokenMint: { $in: Object.keys(tokenChanges) },
@@ -127,7 +126,7 @@ const callback = async (data: any) => {
         symbol,
         minValue,
         minValueEmojis,
-        dexTUrl,
+        poolAddress,
       } = listeningGroup;
 
       const amount = tokenChange.amount.toFixed(2);
@@ -139,11 +138,11 @@ const callback = async (data: any) => {
       const times = Math.floor(tokenChange.amount / minValue);
       for (let i = 0; i < times; i++) emojis += minValueEmojis;
 
-      emojis = emojis.match(/.{1,20}/g)?.join("\n") || "";
+      // emojis = emojis.match(/.{1,20}/g)?.join("\n") || "";
 
-      const caption =
+      let caption =
         `*${name.toUpperCase()} Buy!*\n` +
-        `${emojis}\n\n` +
+        "__emojis__\n\n" +
         `🔀 Spent *$${spentUsd} (${spentSol} SOL)*\n` +
         `🔀 Got *${amount} ${symbol}*\n` +
         `👤 [Buyer](${buyerUrl}${signer}) / [Txn](${txnUrl}${txnSignature})\n` +
@@ -153,9 +152,17 @@ const callback = async (data: any) => {
             : `Position +${positionIncrease}%`
         }*\n` +
         `💸 Market Cap *$${marketCap}*\n\n` +
-        `[DexT](${dexTUrl}) |` +
+        `[DexT](${dexTUrl}${poolAddress}) |` +
         ` [Screener](${dexscreenerUrl}${txnSignature}) |` +
-        ` [Buy](${jupiterUrl}${txnSignature})`;
+        ` [Buy](${jupiterUrl}${txnSignature}) |` +
+        ` [Trending](${solTrendingUrl})`;
+
+      let remainingLength = 1024 - caption.length;
+      if (remainingLength % 2 !== 0) {
+        remainingLength -= 1;
+      }
+      emojis = emojis.slice(0, remainingLength);
+      caption = caption.replace("__emojis__", emojis);
 
       if (!messageQueues[groupId]) {
         messageQueues[groupId] = [];
