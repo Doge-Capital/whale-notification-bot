@@ -29,7 +29,7 @@ const tokenSchema = new mongoose.Schema(
     minValueEmojis: {
       type: String,
       required: true,
-      default: "🟢🟢🟢🟢🟢🟢"
+      default: "🟢🟢🟢",
     },
     poolAddress: {
       type: String,

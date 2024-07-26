@@ -10,7 +10,7 @@ import callback from "./utils/listenerCallback";
 
 configDotenv();
 
-export const bot = new Telegraf(process.env.BOT_TOKEN!);
+const bot = new Telegraf(process.env.BOT_TOKEN!);
 
 const apiKey = process.env.HELIUS_API_KEY;
 const ws = new WebSocket(
@@ -46,7 +46,6 @@ function startPing(ws: WebSocket) {
   setInterval(() => {
     if (ws.readyState === WebSocket.OPEN) {
       ws.ping();
-      console.log("Ping sent");
     }
   }, 30000);
 }
@@ -94,7 +93,7 @@ const sendQueuedMessages = async (groupId: number) => {
   // Check if we can send more messages
   if (messageTimestamps[groupId].length >= 20) {
     console.log(`Rate limit reached for group ${groupId}. Skipping...`);
-    setTimeout(() => sendQueuedMessages(groupId), 60000); // Retry after 1 minute
+    setTimeout(() => sendQueuedMessages(groupId), 40000); // Retry after 1 minute
     return;
   }
 
@@ -103,6 +102,7 @@ const sendQueuedMessages = async (groupId: number) => {
     const message = messages[0];
 
     try {
+      console.log(`Sending message to group ${groupId}`);
       await bot.telegram.sendPhoto(groupId, message.image, {
         caption: message.caption,
         parse_mode: "Markdown",
@@ -112,7 +112,7 @@ const sendQueuedMessages = async (groupId: number) => {
     } catch (error) {
       console.error(`Failed to send message to group ${groupId}:`, error);
       // Retry after 1 minute to avoid spamming retries on persistent errors
-      setTimeout(() => sendQueuedMessages(groupId), 60000);
+      setTimeout(() => sendQueuedMessages(groupId), 40000);
       return;
     }
 
@@ -125,6 +125,7 @@ const sendQueuedMessages = async (groupId: number) => {
 };
 
 const handleQueuedMessages = () => {
+  console.log("Checking for queued messages...", Object.keys(messageQueues));
   Object.keys(messageQueues).forEach((groupId) => {
     const parsedGroupId = Number(groupId);
 
@@ -132,12 +133,15 @@ const handleQueuedMessages = () => {
       messageQueues[parsedGroupId].length &&
       !messageTimestamps[parsedGroupId].length
     ) {
+      console.log(`Sending queued messages to group ${parsedGroupId}`);
       sendQueuedMessages(parsedGroupId);
+    } else {
+      console.log(`No queued messages for group ${parsedGroupId}`);
     }
   });
 
   // Continuously check for new messages
-  setTimeout(handleQueuedMessages, 5000);
+  setTimeout(handleQueuedMessages, 10000);
 };
 
 handleQueuedMessages();
@@ -231,6 +235,10 @@ bot.command("register", async (ctx) => {
     const tokenPools = meteoraPools.filter(
       (p: any) => p.mint_x === tokenMint || p.mint_y === tokenMint
     );
+    if (tokenPools.length === 0) {
+      await ctx.reply("No meteora pool found for this token.");
+      return;
+    }
     //get pool with highest liquidity
     const pool = tokenPools.reduce((prev: any, current: any) => {
       return prev.liquidity > current.liquidity ? prev : current;
@@ -260,7 +268,7 @@ bot.command("register", async (ctx) => {
         `Token: ${tokenMint} has already been registered for this group.`
       );
     } else {
-      await ctx.reply("An error occurred while registering the token.");
+      await ctx.reply(err.message);
     }
     return;
   }
