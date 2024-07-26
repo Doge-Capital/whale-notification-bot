@@ -1,30 +1,140 @@
+import { Metaplex } from "@metaplex-foundation/js";
 import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { Connection, PublicKey } from "@solana/web3.js";
 import { configDotenv } from "dotenv";
 import { Telegraf } from "telegraf";
+import WebSocket from "ws";
 import Token from "./models/token";
 import connectToDatabase from "./utils/database";
 import callback from "./utils/listenerCallback";
-import express from "express";
-import { Metaplex } from "@metaplex-foundation/js";
+
 configDotenv();
 
 export const bot = new Telegraf(process.env.BOT_TOKEN!);
 
-const app = express();
+const apiKey = process.env.HELIUS_API_KEY;
+const ws = new WebSocket(
+  `wss://atlas-mainnet.helius-rpc.com/?api-key=${apiKey}`
+);
 
-const PORT = process.env.PORT || 3000;
+function sendRequest(ws: WebSocket) {
+  const request = {
+    jsonrpc: "2.0",
+    id: 420,
+    method: "transactionSubscribe",
+    params: [
+      {
+        accountInclude: [
+          "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo",
+          "Eo7WjKq67rjJQSZxS6z3YkapzY3eMj6Xy8X5EQVn5UaB",
+        ],
+      },
+      {
+        vote: false,
+        failed: false,
+        commitment: "finalized",
+        encoding: "jsonParsed",
+        transactionDetails: "full",
+        maxSupportedTransactionVersion: 0,
+      },
+    ],
+  };
+  ws.send(JSON.stringify(request));
+}
 
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
+function startPing(ws: WebSocket) {
+  setInterval(() => {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.ping();
+      console.log("Ping sent");
+    }
+  }, 30000);
+}
+
+ws.on("open", function open() {
+  console.log("WebSocket is open");
+  sendRequest(ws);
+  startPing(ws);
 });
 
-app.use(express.json());
+ws.on("message", function incoming(data) {
+  const messageStr = data.toString("utf8");
+  try {
+    const messageObj = JSON.parse(messageStr);
 
-app.post("/webhook", async (req: any, res: any) => {
-  const data = req.body;
-  callback(data[0]);
+    if (messageObj?.params) {
+      callback(messageObj.params.result);
+    }
+  } catch (e) {
+    console.error("Failed to parse JSON:", e);
+  }
 });
+
+ws.on("error", function error(err) {
+  console.error("WebSocket error:", err);
+});
+
+ws.on("close", function close() {
+  console.log("WebSocket is closed");
+});
+
+export const messageQueues: {
+  [key: number]: Array<{ image: string; caption: string }>;
+} = {};
+export const messageTimestamps: { [key: number]: Array<number> } = {};
+
+const sendQueuedMessages = async (groupId: number) => {
+  const now = Date.now();
+
+  // Remove timestamps older than 1 minute
+  messageTimestamps[groupId] = messageTimestamps[groupId].filter(
+    (timestamp) => now - timestamp < 60000
+  );
+
+  // Check if we can send more messages
+  if (messageTimestamps[groupId].length >= 20) {
+    console.log(`Rate limit reached for group ${groupId}. Skipping...`);
+    setTimeout(() => sendQueuedMessages(groupId), 60000); // Retry after 1 minute
+    return;
+  }
+
+  const messages = messageQueues[groupId];
+  if (messages.length > 0) {
+    const message = messages[0];
+
+    try {
+      await bot.telegram.sendPhoto(groupId, message.image, {
+        caption: message.caption,
+        parse_mode: "Markdown",
+      });
+      messages.shift();
+      messageTimestamps[groupId].push(now);
+    } catch (error) {
+      console.error(`Failed to send message to group ${groupId}:`, error);
+      // Retry after 1 minute to avoid spamming retries on persistent errors
+      setTimeout(() => sendQueuedMessages(groupId), 60000);
+      return;
+    }
+  }
+
+  // Continue processing messages every second if there are messages left
+  if (messages.length > 0) {
+    setTimeout(() => sendQueuedMessages(groupId), 1000);
+  }
+};
+
+const handleQueuedMessages = () => {
+  Object.keys(messageQueues).forEach((groupId) => {
+    if (messageQueues[groupId].length && !messageTimestamps[groupId].length) {
+      sendQueuedMessages(Number(groupId));
+    }
+  });
+
+  // Continuously check for new messages
+  setTimeout(handleQueuedMessages, 5000);
+};
+
+handleQueuedMessages();
 
 bot.start((ctx) => {
   if (ctx.chat.type === "private") {
