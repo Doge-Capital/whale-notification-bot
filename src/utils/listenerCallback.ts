@@ -14,43 +14,49 @@ const dexTUrl = "https://www.dextools.io/app/en/solana/pair-explorer/";
 const solTrendingUrl = "https://t.me/SOLTRENDING";
 
 const getTokenInfo = async (tokenMint: string) => {
-  const connection = new Connection(process.env.BACKEND_RPC!);
+  try {
+    const connection = new Connection(process.env.BACKEND_RPC!);
 
-  const accountInfoPromise = connection.getParsedAccountInfo(
-    new PublicKey(tokenMint)
-  );
-  const tokenPricePromise = fetch(
-    `https://price.jup.ag/v6/price?ids=${tokenMint},SOL`
-  ).then((res) => res.json());
+    const accountInfoPromise = connection.getParsedAccountInfo(
+      new PublicKey(tokenMint)
+    );
+    const tokenPricePromise = fetch(
+      `https://price.jup.ag/v6/price?ids=${tokenMint},SOL`
+    ).then((res) => res.json());
 
-  const [accountInfoResult, tokenPriceResult]: [any, any] =
-    await Promise.allSettled([accountInfoPromise, tokenPricePromise]);
+    const [accountInfoResult, tokenPriceResult]: [any, any] =
+      await Promise.allSettled([accountInfoPromise, tokenPricePromise]);
 
-  if (
-    accountInfoResult.status !== "fulfilled" ||
-    !accountInfoResult.value.value
-  ) {
-    throw new Error("Account info not found");
+    if (
+      accountInfoResult.status !== "fulfilled" ||
+      !accountInfoResult.value.value
+    ) {
+      throw new Error("Account info not found");
+    }
+
+    const accountInfo = (accountInfoResult.value.value?.data as any).parsed
+      .info;
+    const decimals = accountInfo.decimals;
+    const totalSupply = parseInt(accountInfo.supply) / 10 ** decimals;
+
+    if (
+      tokenPriceResult.status !== "fulfilled" ||
+      !tokenPriceResult.value.data[tokenMint]
+    ) {
+      throw new Error("Token price not found");
+    }
+
+    const tokenPrice = tokenPriceResult.value.data[tokenMint].price;
+    const solPrice = tokenPriceResult.value.data.SOL.price;
+
+    if (!totalSupply) throw new Error("Total supply not found");
+    const marketCap = Math.floor(totalSupply * tokenPrice).toLocaleString();
+
+    return { marketCap, tokenPrice, solPrice };
+  } catch (error: any) {
+    console.log("Error in getTokenInfo", error.message);
+    return { marketCap: 0, tokenPrice: 0, solPrice: 0 };
   }
-
-  const accountInfo = (accountInfoResult.value.value?.data as any).parsed.info;
-  const decimals = accountInfo.decimals;
-  const totalSupply = parseInt(accountInfo.supply) / 10 ** decimals;
-
-  if (
-    tokenPriceResult.status !== "fulfilled" ||
-    !tokenPriceResult.value.data[tokenMint]
-  ) {
-    throw new Error("Token price not found");
-  }
-
-  const tokenPrice = tokenPriceResult.value.data[tokenMint].price;
-  const solPrice = tokenPriceResult.value.data.SOL.price;
-
-  if (!totalSupply) throw new Error("Total supply not found");
-  const marketCap = Math.floor(totalSupply * tokenPrice).toLocaleString();
-
-  return { marketCap, tokenPrice, solPrice };
 };
 
 const callback = async (data: any) => {
@@ -158,9 +164,8 @@ const callback = async (data: any) => {
         ` [Trending](${solTrendingUrl})`;
 
       let remainingLength = 1024 - caption.length;
-      if (remainingLength % 2 !== 0) {
-        remainingLength -= 1;
-      }
+      remainingLength -= remainingLength % minValueEmojis.length;
+
       emojis = emojis.slice(0, remainingLength);
       caption = caption.replace("__emojis__", emojis);
 
