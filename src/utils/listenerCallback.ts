@@ -11,20 +11,18 @@ const jupiterUrl = "https://jup.ag/swap/USDC-";
 const txnUrl = "https://solscan.io/tx/";
 const buyerUrl = "https://solscan.io/account/";
 
-const getMarketCap = async (tokenMint: string) => {
+const getTokenInfo = async (tokenMint: string) => {
   const connection = new Connection(process.env.BACKEND_RPC!);
 
   const accountInfoPromise = connection.getParsedAccountInfo(
     new PublicKey(tokenMint)
   );
   const tokenPricePromise = fetch(
-    `https://price.jup.ag/v6/price?ids=${tokenMint}`
+    `https://price.jup.ag/v6/price?ids=${tokenMint},SOL`
   ).then((res) => res.json());
 
-  const [accountInfoResult, tokenPriceResult] = await Promise.allSettled([
-    accountInfoPromise,
-    tokenPricePromise,
-  ]);
+  const [accountInfoResult, tokenPriceResult]: [any, any] =
+    await Promise.allSettled([accountInfoPromise, tokenPricePromise]);
 
   if (
     accountInfoResult.status !== "fulfilled" ||
@@ -45,16 +43,17 @@ const getMarketCap = async (tokenMint: string) => {
   }
 
   const tokenPrice = tokenPriceResult.value.data[tokenMint].price;
+  const solPrice = tokenPriceResult.value.data.SOL.price;
 
   if (!totalSupply) throw new Error("Total supply not found");
-  const marketCap = totalSupply * tokenPrice;
+  const marketCap = Math.floor(totalSupply * tokenPrice).toLocaleString();
 
-  return marketCap;
+  return { marketCap, tokenPrice, solPrice };
 };
 
 const callback = async (data: any) => {
   try {
-    if (data.meta.err) return;
+    if (data.transaction.meta.err) return;
 
     const txnSignature = data.signature;
 
@@ -66,10 +65,9 @@ const callback = async (data: any) => {
       return;
     }
 
-    const signer = data.transaction.message.accountKeys.find(
+    const signer = data.transaction.transaction.message.accountKeys.find(
       (acc: any) => acc.signer
     ).pubkey;
-    console.log("Signer:", signer);
 
     const tokenChanges: Record<
       string,
@@ -79,15 +77,17 @@ const callback = async (data: any) => {
     const preTokenBalances = data.transaction.meta.preTokenBalances;
     const postTokenBalances = data.transaction.meta.postTokenBalances;
 
-    for (let i = 0; i < preTokenBalances.length; i++) {
-      const preTokenBalance = preTokenBalances[i];
+    for (let i = 0; i < postTokenBalances.length; i++) {
       const postTokenBalance = postTokenBalances[i];
+      const preTokenBalance = preTokenBalances.find(
+        (t: any) => t.accountIndex === postTokenBalance.accountIndex
+      );
 
-      if (preTokenBalance.owner !== signer) continue;
+      if (postTokenBalance.owner !== signer) continue;
 
-      const mint = preTokenBalance.mint;
+      const mint = postTokenBalance.mint;
 
-      const preTokenAmount = preTokenBalance.uiTokenAmount.uiAmount;
+      const preTokenAmount = preTokenBalance?.uiTokenAmount?.uiAmount ?? 0;
       const postTokenAmount = postTokenBalance.uiTokenAmount.uiAmount;
 
       if (postTokenAmount === preTokenAmount) continue;
@@ -102,7 +102,9 @@ const callback = async (data: any) => {
         positionIncrease,
       };
     }
-    // console.log("Token changes:", tokenChanges, txnSignature);
+
+    // if (tokenChanges["JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN"])
+    //   console.log("Token changes:", tokenChanges, txnSignature);
 
     const listeningGroups = await Token.find({
       tokenMint: { $in: Object.keys(tokenChanges) },
@@ -117,23 +119,43 @@ const callback = async (data: any) => {
         continue;
       }
 
-      const marketCap = await getMarketCap(tokenMint);
-      const { groupId, image, name, symbol } = listeningGroup;
+      const { marketCap, tokenPrice, solPrice } = await getTokenInfo(tokenMint);
+      const {
+        groupId,
+        image,
+        name,
+        symbol,
+        minValue,
+        minValueEmojis,
+        dexTUrl,
+      } = listeningGroup;
 
       const amount = tokenChange.amount.toFixed(2);
       const positionIncrease = tokenChange.positionIncrease.toFixed(2);
+      const spentUsd = (tokenChange.amount * tokenPrice).toFixed(2);
+      const spentSol = (parseFloat(spentUsd) / solPrice).toFixed(2);
+
+      let emojis = "";
+      const times = Math.floor(tokenChange.amount / minValue);
+      for (let i = 0; i < times; i++) emojis += minValueEmojis;
+
+      emojis = emojis.match(/.{1,20}/g)?.join("\n") || "";
 
       const caption =
-        `*${name} Buy!*\n` +
-        `Got *${amount} ${symbol}*\n` +
-        `*${
+        `*${name.toUpperCase()} Buy!*\n` +
+        `${emojis}\n\n` +
+        `🔀 Spent *$${spentUsd} (${spentSol} SOL)*\n` +
+        `🔀 Got *${amount} ${symbol}*\n` +
+        `👤 [Buyer](${buyerUrl}${signer}) / [Txn](${txnUrl}${txnSignature})\n` +
+        `🪙 *${
           tokenChange.isNewHolder
             ? "New Holder"
             : `Position +${positionIncrease}%`
         }*\n` +
-        `[Buyer](${buyerUrl}${signer}) / [Txn](${txnUrl}${txnSignature})\n` +
-        `Market Cap *$${marketCap}*\n\n` +
-        `[Buy](${jupiterUrl}${txnSignature}) | [Dexscreener](${dexscreenerUrl}${txnSignature})`;
+        `💸 Market Cap *$${marketCap}*\n\n` +
+        `[DexT](${dexTUrl}) |` +
+        ` [Screener](${dexscreenerUrl}${txnSignature}) |` +
+        ` [Buy](${jupiterUrl}${txnSignature})`;
 
       if (!messageQueues[groupId]) {
         messageQueues[groupId] = [];

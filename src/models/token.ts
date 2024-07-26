@@ -26,6 +26,14 @@ const tokenSchema = new mongoose.Schema(
       type: Number,
       required: true,
     },
+    minValueEmojis: {
+      type: [String],
+      required: true,
+    },
+    dexTUrl: {
+      type: String,
+      required: true,
+    },
   },
   {
     timestamps: true,

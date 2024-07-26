@@ -115,18 +115,24 @@ const sendQueuedMessages = async (groupId: number) => {
       setTimeout(() => sendQueuedMessages(groupId), 60000);
       return;
     }
-  }
 
-  // Continue processing messages every second if there are messages left
-  if (messages.length > 0) {
+    // Continue processing messages every second if there are messages left
     setTimeout(() => sendQueuedMessages(groupId), 1000);
+  } else {
+    delete messageQueues[groupId];
+    delete messageTimestamps[groupId];
   }
 };
 
 const handleQueuedMessages = () => {
   Object.keys(messageQueues).forEach((groupId) => {
-    if (messageQueues[groupId].length && !messageTimestamps[groupId].length) {
-      sendQueuedMessages(Number(groupId));
+    const parsedGroupId = Number(groupId);
+
+    if (
+      messageQueues[parsedGroupId].length &&
+      !messageTimestamps[parsedGroupId].length
+    ) {
+      sendQueuedMessages(parsedGroupId);
     }
   });
 
