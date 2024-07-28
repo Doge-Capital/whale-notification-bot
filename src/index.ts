@@ -226,7 +226,7 @@ bot.command("register", async (ctx) => {
     const token = await metaplex.nfts().findByMint({ mintAddress });
     const name = token.name;
     const symbol = token.symbol;
-    const image = token.json!.image;
+    const image = token.json?.image;
 
     const meteoraPools: any = await fetch(
       "https://dlmm-api.meteora.ag/pair/all"

@@ -125,7 +125,7 @@ const callback = async (data: any) => {
       }
 
       const { marketCap, tokenPrice, solPrice } = await getTokenInfo(tokenMint);
-      const {
+      let {
         groupId,
         image,
         name,
@@ -135,16 +135,14 @@ const callback = async (data: any) => {
         poolAddress,
       } = listeningGroup;
 
+      image =
+        image ||
+        "https://static.vecteezy.com/system/resources/previews/006/153/238/original/solana-sol-logo-crypto-currency-purple-theme-background-neon-design-vector.jpg";
+
       const amount = tokenChange.amount.toFixed(2);
       const positionIncrease = tokenChange.positionIncrease.toFixed(2);
       const spentUsd = (tokenChange.amount * tokenPrice).toFixed(2);
       const spentSol = (parseFloat(spentUsd) / solPrice).toFixed(2);
-
-      let emojis = "";
-      const times = Math.floor(tokenChange.amount / minValue);
-      for (let i = 0; i < times; i++) emojis += minValueEmojis;
-
-      // emojis = emojis.match(/.{1,20}/g)?.join("\n") || "";
 
       let caption =
         `*${name.toUpperCase()} Buy!*\n` +
@@ -166,8 +164,20 @@ const callback = async (data: any) => {
       let remainingLength = 1024 - caption.length;
       remainingLength -= remainingLength % minValueEmojis.length;
 
-      emojis = emojis.slice(0, remainingLength);
+      let emojis = "";
+      const times = Math.min(
+        Math.floor(tokenChange.amount / minValue),
+        remainingLength / minValueEmojis.length
+      );
+      for (let i = 0; i < times; i++) emojis += minValueEmojis;
+
+      // emojis = emojis.match(/.{1,20}/g)?.join("\n") || "";
+
+      // emojis = emojis.slice(0, remainingLength);
+      console.log("length ", minValueEmojis.length);
+      console.log("emojis ", emojis.length);
       caption = caption.replace("__emojis__", emojis);
+      console.log(caption);
 
       if (!messageQueues[groupId]) {
         messageQueues[groupId] = [];
