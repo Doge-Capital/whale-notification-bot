@@ -174,10 +174,7 @@ const callback = async (data: any) => {
       // emojis = emojis.match(/.{1,20}/g)?.join("\n") || "";
 
       // emojis = emojis.slice(0, remainingLength);
-      console.log("length ", minValueEmojis.length);
-      console.log("emojis ", emojis.length);
       caption = caption.replace("__emojis__", emojis);
-      console.log(caption);
 
       if (!messageQueues[groupId]) {
         messageQueues[groupId] = [];
