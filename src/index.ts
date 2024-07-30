@@ -61,7 +61,7 @@ function initializeWebSocket() {
   });
 
   ws.on("message", async function incoming(data) {
-    console.log("Received message");
+    // console.log("Received message");
     const messageStr = data.toString("utf8");
     try {
       const messageObj = JSON.parse(messageStr);
@@ -134,7 +134,7 @@ const sendQueuedMessages = async (groupId: number) => {
 };
 
 const handleQueuedMessages = () => {
-  console.log("Checking for queued messages...", Object.keys(messageQueues));
+  // console.log("Checking for queued messages...", Object.keys(messageQueues));
   Object.keys(messageQueues).forEach((groupId) => {
     const parsedGroupId = Number(groupId);
 
