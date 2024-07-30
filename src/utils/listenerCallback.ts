@@ -56,8 +56,7 @@ const getTokenInfo = async (tokenMint: string) => {
     // Usage
     const tokenPriceResult = await fetchTokenPrice(tokenMint);
 
-    const accountInfo = (accountInfoResult.value?.data as any).parsed
-      .info;
+    const accountInfo = (accountInfoResult.value?.data as any).parsed.info;
     const decimals = accountInfo.decimals;
     const totalSupply = parseInt(accountInfo.supply) / 10 ** decimals;
 
@@ -171,10 +170,9 @@ const callback = async (data: any) => {
             : `Position +${positionIncrease}%`
         }*\n` +
         `💸 Market Cap *$${marketCap}*\n\n` +
-        `[DexT](${dexTUrl}${poolAddress}) |` +
-        ` [Screener](${dexscreenerUrl}${poolAddress}) |` +
-        ` [Buy](${jupiterUrl}${tokenMint}) |` +
-        ` [Trending](${solTrendingUrl})`;
+        `[Screener](${dexscreenerUrl}${poolAddress}) |` +
+        ` [DexT](${dexTUrl}${poolAddress}) |` +
+        ` [Buy](${jupiterUrl}${tokenMint})`;
 
       let remainingLength = 1024 - caption.length;
       remainingLength -= remainingLength % minValueEmojis.length;
