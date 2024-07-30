@@ -54,14 +54,33 @@ const getTokenInfo = async (tokenMint: string) => {
     }
 
     // Usage
-    const tokenPriceResult = await fetchTokenPrice(tokenMint);
+    let tokenPrice: number,
+      solPrice: number = 0;
+    try {
+      const tokenPriceResult = await fetchTokenPrice(tokenMint);
+      solPrice = tokenPriceResult.data.SOL.price;
+
+      if (!tokenPriceResult.data[tokenMint])
+        throw new Error("SOL price found, token price not found");
+      tokenPrice = tokenPriceResult.data[tokenMint].price;
+    } catch (error: any) {
+      console.log("Fetching token price failed. Trying dexscreener...");
+      const data: any = await fetch(
+        `https://api.dexscreener.com/latest/dex/pairs/solana/${tokenMint}`
+      ).then((res) => res.json());
+      tokenPrice = data.pairs[0].priceUsd;
+
+      if (!solPrice) {
+        const data: any = await fetch(
+          `https://api.dexscreener.com/latest/dex/pairs/solana/So11111111111111111111111111111111111111112`
+        ).then((res) => res.json());
+        tokenPrice = data.pairs[0].priceUsd;
+      }
+    }
 
     const accountInfo = (accountInfoResult.value?.data as any).parsed.info;
     const decimals = accountInfo.decimals;
     const totalSupply = parseInt(accountInfo.supply) / 10 ** decimals;
-
-    const tokenPrice = tokenPriceResult.data[tokenMint].price;
-    const solPrice = tokenPriceResult.data.SOL.price;
 
     if (!totalSupply) throw new Error("Total supply not found");
     const marketCap = Math.floor(totalSupply * tokenPrice).toLocaleString();
