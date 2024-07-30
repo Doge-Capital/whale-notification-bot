@@ -17,37 +17,52 @@ const getTokenInfo = async (tokenMint: string) => {
   try {
     const connection = new Connection(process.env.BACKEND_RPC!);
 
-    const accountInfoPromise = connection.getParsedAccountInfo(
+    const accountInfoResult: any = await connection.getParsedAccountInfo(
       new PublicKey(tokenMint)
     );
-    const tokenPricePromise = fetch(
-      `https://price.jup.ag/v6/price?ids=${tokenMint},SOL`
-    ).then((res) => res.json());
 
-    const [accountInfoResult, tokenPriceResult]: [any, any] =
-      await Promise.allSettled([accountInfoPromise, tokenPricePromise]);
-
-    if (
-      accountInfoResult.status !== "fulfilled" ||
-      !accountInfoResult.value.value
-    ) {
+    if (!accountInfoResult.value) {
+      console.log("accountInfoResult", accountInfoResult);
       throw new Error("Account info not found");
     }
 
-    const accountInfo = (accountInfoResult.value.value?.data as any).parsed
+    async function fetchTokenPrice(tokenMint: string) {
+      const url = `https://price.jup.ag/v6/price?ids=${tokenMint},SOL`;
+      let attempts = 0;
+      const maxAttempts = 7;
+
+      while (attempts < maxAttempts) {
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+          const tokenPriceResult: any = await fetch(url).then((res) =>
+            res.json()
+          );
+          if (!tokenPriceResult.data[tokenMint]) {
+            throw new Error("Token price not found");
+          }
+          return tokenPriceResult;
+        } catch (error: any) {
+          attempts++;
+          if (attempts >= maxAttempts) {
+            throw new Error(
+              `Failed to fetch token price after ${maxAttempts} attempts: ${error.message}`
+            );
+          }
+          console.log(`Attempt ${attempts} failed. Retrying...`);
+        }
+      }
+    }
+
+    // Usage
+    const tokenPriceResult = await fetchTokenPrice(tokenMint);
+
+    const accountInfo = (accountInfoResult.value?.data as any).parsed
       .info;
     const decimals = accountInfo.decimals;
     const totalSupply = parseInt(accountInfo.supply) / 10 ** decimals;
 
-    if (
-      tokenPriceResult.status !== "fulfilled" ||
-      !tokenPriceResult.value.data[tokenMint]
-    ) {
-      throw new Error("Token price not found");
-    }
-
-    const tokenPrice = tokenPriceResult.value.data[tokenMint].price;
-    const solPrice = tokenPriceResult.value.data.SOL.price;
+    const tokenPrice = tokenPriceResult.data[tokenMint].price;
+    const solPrice = tokenPriceResult.data.SOL.price;
 
     if (!totalSupply) throw new Error("Total supply not found");
     const marketCap = Math.floor(totalSupply * tokenPrice).toLocaleString();
@@ -157,8 +172,8 @@ const callback = async (data: any) => {
         }*\n` +
         `💸 Market Cap *$${marketCap}*\n\n` +
         `[DexT](${dexTUrl}${poolAddress}) |` +
-        ` [Screener](${dexscreenerUrl}${txnSignature}) |` +
-        ` [Buy](${jupiterUrl}${txnSignature}) |` +
+        ` [Screener](${dexscreenerUrl}${poolAddress}) |` +
+        ` [Buy](${jupiterUrl}${tokenMint}) |` +
         ` [Trending](${solTrendingUrl})`;
 
       let remainingLength = 1024 - caption.length;

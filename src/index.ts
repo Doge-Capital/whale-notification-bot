@@ -13,9 +13,6 @@ configDotenv();
 const bot = new Telegraf(process.env.BOT_TOKEN!);
 
 const apiKey = process.env.HELIUS_API_KEY;
-const ws = new WebSocket(
-  `wss://atlas-mainnet.helius-rpc.com/?api-key=${apiKey}`
-);
 
 function sendRequest(ws: WebSocket) {
   const request = {
@@ -46,36 +43,48 @@ function startPing(ws: WebSocket) {
   setInterval(() => {
     if (ws.readyState === WebSocket.OPEN) {
       ws.ping();
+    } else {
+      console.log("WebSocket is not open");
     }
-  }, 30000);
+  }, 10000);
 }
 
-ws.on("open", function open() {
-  console.log("WebSocket is open");
-  sendRequest(ws);
-  startPing(ws);
-});
+function initializeWebSocket() {
+  const ws = new WebSocket(
+    `wss://atlas-mainnet.helius-rpc.com/?api-key=${apiKey}`
+  );
 
-ws.on("message", function incoming(data) {
-  const messageStr = data.toString("utf8");
-  try {
-    const messageObj = JSON.parse(messageStr);
+  ws.on("open", function open() {
+    console.log("WebSocket is open");
+    sendRequest(ws);
+    startPing(ws);
+  });
 
-    if (messageObj?.params) {
-      callback(messageObj.params.result);
+  ws.on("message", async function incoming(data) {
+    console.log("Received message");
+    const messageStr = data.toString("utf8");
+    try {
+      const messageObj = JSON.parse(messageStr);
+
+      if (messageObj?.params) {
+        await callback(messageObj.params.result);
+      }
+    } catch (e) {
+      console.log("Failed to parse JSON:", e);
     }
-  } catch (e) {
-    console.error("Failed to parse JSON:", e);
-  }
-});
+  });
 
-ws.on("error", function error(err) {
-  console.error("WebSocket error:", err);
-});
+  ws.on("error", function error(err) {
+    console.log("WebSocket error:", err);
+  });
 
-ws.on("close", function close() {
-  console.log("WebSocket is closed");
-});
+  ws.on("close", function close() {
+    console.log("WebSocket is closed, attempting to restart...");
+    setTimeout(initializeWebSocket, 5000); // Restart after 5 second
+  });
+}
+
+initializeWebSocket();
 
 export const messageQueues: {
   [key: number]: Array<{ image: string; caption: string }>;
@@ -173,28 +182,35 @@ bot.command("list", async (ctx) => {
 });
 
 bot.command("register", async (ctx) => {
-  const messageText = ctx.message.text;
-  const params = messageText.split(" ");
-
-  if (params.length !== 3) {
-    await ctx.reply("Usage: /register <token_mint> <min_value>");
-    return;
-  }
-
-  const [command, tokenMint, minValueStr] = params;
-  const minValue = Number(minValueStr);
-
-  if (isNaN(minValue)) {
-    await ctx.reply("Please provide a valid number for the minimum value.");
-    return;
-  }
-
-  const mintAddress = new PublicKey(tokenMint);
-
-  const connection = new Connection(process.env.BACKEND_RPC!);
-  const metaplex = Metaplex.make(connection);
-
   try {
+    const messageText = ctx.message.text;
+    console.log("register message:", messageText);
+
+    const params = messageText.split(" ");
+
+    if (params.length !== 3) {
+      await ctx.reply("Usage: /register <token_mint> <min_value>");
+      return;
+    }
+
+    let [command, tokenMint, minValueStr] = params;
+
+    // Remove non-alphanumeric characters
+    tokenMint = tokenMint.replace(/[^a-zA-Z0-9]/g, "");
+    minValueStr = minValueStr.replace(/[^a-zA-Z0-9]/g, "");
+
+    const minValue = Number(minValueStr);
+
+    if (isNaN(minValue)) {
+      await ctx.reply("Please provide a valid number for the minimum value.");
+      return;
+    }
+
+    const mintAddress = new PublicKey(tokenMint);
+
+    const connection = new Connection(process.env.BACKEND_RPC!);
+    const metaplex = Metaplex.make(connection);
+
     const accInfo = await connection.getAccountInfo(mintAddress);
     if (!accInfo?.owner.equals(TOKEN_PROGRAM_ID)) {
       await ctx.reply("Please provide a valid token mint address.");
@@ -213,94 +229,100 @@ bot.command("register", async (ctx) => {
       await ctx.reply("Metadata account info not found.");
       return;
     }
-  } catch (error: any) {
-    await ctx.reply(error.message);
-    return;
-  }
 
-  await connectToDatabase();
+    await connectToDatabase();
 
-  const groupId = ctx.chat.id;
+    const groupId = ctx.chat.id;
 
-  try {
-    const token = await metaplex.nfts().findByMint({ mintAddress });
-    const name = token.name;
-    const symbol = token.symbol;
-    const image = token.json?.image;
+    try {
+      const token = await metaplex.nfts().findByMint({ mintAddress });
+      const name = token.name;
+      const symbol = token.symbol;
+      const image = token.json?.image;
 
-    const meteoraPools: any = await fetch(
-      "https://dlmm-api.meteora.ag/pair/all"
-    ).then((res) => res.json());
+      const meteoraPools: any = await fetch(
+        "https://dlmm-api.meteora.ag/pair/all"
+      ).then((res) => res.json());
 
-    const tokenPools = meteoraPools.filter(
-      (p: any) => p.mint_x === tokenMint || p.mint_y === tokenMint
-    );
-    if (tokenPools.length === 0) {
-      await ctx.reply("No meteora pool found for this token.");
-      return;
-    }
-    //get pool with highest liquidity
-    const pool = tokenPools.reduce((prev: any, current: any) => {
-      return prev.liquidity > current.liquidity ? prev : current;
-    });
-
-    if (!pool) {
-      await ctx.reply("No pool found for this token.");
-      return;
-    }
-
-    await Token.create({
-      groupId,
-      tokenMint,
-      name,
-      symbol,
-      image,
-      minValue,
-      poolAddress: pool.address,
-    });
-
-    await ctx.reply(
-      `Registered token: ${tokenMint}, with minimum value: ${minValue}`
-    );
-  } catch (err: any) {
-    if (err.code === 11000) {
-      await ctx.reply(
-        `Token: ${tokenMint} has already been registered for this group.`
+      const tokenPools = meteoraPools.filter(
+        (p: any) => p.mint_x === tokenMint || p.mint_y === tokenMint
       );
-    } else {
-      await ctx.reply(err.message);
+      if (tokenPools.length === 0) {
+        await ctx.reply("No meteora pool found for this token.");
+        return;
+      }
+      //get pool with highest liquidity
+      const pool = tokenPools.reduce((prev: any, current: any) => {
+        return prev.liquidity > current.liquidity ? prev : current;
+      });
+
+      if (!pool) {
+        await ctx.reply("No pool found for this token.");
+        return;
+      }
+
+      await Token.create({
+        groupId,
+        tokenMint,
+        name,
+        symbol,
+        image,
+        minValue,
+        poolAddress: pool.address,
+      });
+
+      await ctx.reply(
+        `Registered token: ${tokenMint}, with minimum value: ${minValue}`
+      );
+    } catch (err: any) {
+      if (err.code === 11000) {
+        await ctx.reply(
+          `Token: ${tokenMint} has already been registered for this group.`
+        );
+      } else {
+        await ctx.reply(err.message);
+      }
+      return;
     }
-    return;
+  } catch (error: any) {
+    console.log(error.message);
+    await ctx.reply(error.message);
   }
 });
 
 bot.command("unregister", async (ctx) => {
-  const messageText = ctx.message.text;
-  const params = messageText.split(" ");
-
-  if (params.length !== 2) {
-    await ctx.reply("Usage: /unregister <token_mint>");
-    return;
-  }
-
-  const [command, tokenMint] = params;
-
   try {
-    await connectToDatabase();
-    const result = await Token.deleteOne({
-      groupId: ctx.chat.id,
-      tokenMint,
-    });
+    console.log("unregister message:", ctx.message.text);
+    const messageText = ctx.message.text;
+    const params = messageText.split(" ");
 
-    if (result.deletedCount === 0) {
-      await ctx.reply(
-        `Token: ${tokenMint} has not been registered for this group.`
-      );
-    } else {
-      await ctx.reply(`Unregistered token: ${tokenMint}`);
+    if (params.length !== 2) {
+      await ctx.reply("Usage: /unregister <token_mint>");
+      return;
     }
-  } catch (err: any) {
-    await ctx.reply("An error occurred while unregistering the token.");
+
+    const [command, tokenMint] = params;
+
+    try {
+      await connectToDatabase();
+      const result = await Token.deleteOne({
+        groupId: ctx.chat.id,
+        tokenMint,
+      });
+
+      if (result.deletedCount === 0) {
+        await ctx.reply(
+          `Token: ${tokenMint} has not been registered for this group.`
+        );
+      } else {
+        await ctx.reply(`Unregistered token: ${tokenMint}`);
+      }
+    } catch (err: any) {
+      await ctx.reply("An error occurred while unregistering the token.");
+    }
+  } catch (error: any) {
+    console.log(error.message);
+    await ctx.reply(error.message);
   }
 });
 
