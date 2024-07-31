@@ -14,6 +14,14 @@ const bot = new Telegraf(process.env.BOT_TOKEN!);
 
 const apiKey = process.env.HELIUS_API_KEY;
 
+// Memory usage logging
+setInterval(() => {
+  const memoryUsage = process.memoryUsage();
+  console.log(
+    `Memory Usage: RSS=${memoryUsage.rss}, HeapTotal=${memoryUsage.heapTotal}, HeapUsed=${memoryUsage.heapUsed}`
+  );
+}, 60000); // Log every minute
+
 function sendRequest(ws: WebSocket) {
   const request = {
     jsonrpc: "2.0",
