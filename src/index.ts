@@ -42,14 +42,16 @@ function sendRequest(ws: WebSocket) {
 function startPing(ws: WebSocket) {
   setInterval(() => {
     if (ws.readyState === WebSocket.OPEN) {
+      console.log("Sending ping...");
       ws.ping();
     } else {
       console.log("WebSocket is not open");
     }
-  }, 10000);
+  }, 15000);
 }
 
 function initializeWebSocket() {
+  console.log("Initializing WebSocket...");
   const ws = new WebSocket(
     `wss://atlas-mainnet.helius-rpc.com/?api-key=${apiKey}`
   );

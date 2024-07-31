@@ -29,7 +29,7 @@ const getTokenInfo = async (tokenMint: string) => {
     async function fetchTokenPrice(tokenMint: string) {
       const url = `https://price.jup.ag/v6/price?ids=${tokenMint},SOL`;
       let attempts = 0;
-      const maxAttempts = 7;
+      const maxAttempts = 5;
 
       while (attempts < maxAttempts) {
         try {
