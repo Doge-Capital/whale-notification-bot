@@ -65,16 +65,24 @@ const getTokenInfo = async (tokenMint: string) => {
       tokenPrice = tokenPriceResult.data[tokenMint].price;
     } catch (error: any) {
       console.log("Fetching token price failed. Trying dexscreener...");
+
+      const options = {
+        method: "GET",
+        headers: { "X-API-KEY": process.env.BIRDSEYE_API_KEY! },
+      };
       const data: any = await fetch(
-        `https://api.dexscreener.com/latest/dex/pairs/solana/${tokenMint}`
+        `https://public-api.birdeye.so/defi/price?address=${tokenMint}`,
+        options
       ).then((res) => res.json());
-      tokenPrice = data.pairs[0].priceUsd;
+
+      tokenPrice = data.data.value;
 
       if (!solPrice) {
         const data: any = await fetch(
-          `https://api.dexscreener.com/latest/dex/pairs/solana/So11111111111111111111111111111111111111112`
+          `https://public-api.birdeye.so/defi/price?address=So11111111111111111111111111111111111111112`,
+          options
         ).then((res) => res.json());
-        tokenPrice = data.pairs[0].priceUsd;
+        solPrice = data.data.value;
       }
     }
 
