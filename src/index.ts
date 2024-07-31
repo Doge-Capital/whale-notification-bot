@@ -43,7 +43,11 @@ function startPing(ws: WebSocket) {
   setInterval(() => {
     if (ws.readyState === WebSocket.OPEN) {
       console.log("Sending ping...");
-      ws.ping();
+      ws.ping(undefined, undefined, (err) => {
+        if (err) {
+          console.log("Failed to send ping:", err);
+        }
+      });
     } else {
       console.log("WebSocket is not open");
     }

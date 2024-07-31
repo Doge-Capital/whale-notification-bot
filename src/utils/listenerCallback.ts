@@ -13,19 +13,8 @@ const buyerUrl = "https://solscan.io/account/";
 const dexTUrl = "https://www.dextools.io/app/en/solana/pair-explorer/";
 const solTrendingUrl = "https://t.me/SOLTRENDING";
 
-const getTokenInfo = async (tokenMint: string) => {
+const getTokenPrice = async (tokenMint: string) => {
   try {
-    const connection = new Connection(process.env.BACKEND_RPC!);
-
-    const accountInfoResult: any = await connection.getParsedAccountInfo(
-      new PublicKey(tokenMint)
-    );
-
-    if (!accountInfoResult.value) {
-      console.log("accountInfoResult", accountInfoResult);
-      throw new Error("Account info not found");
-    }
-
     async function fetchTokenPrice(tokenMint: string) {
       const url = `https://price.jup.ag/v6/price?ids=${tokenMint},SOL`;
       let attempts = 0;
@@ -64,7 +53,7 @@ const getTokenInfo = async (tokenMint: string) => {
         throw new Error("SOL price found, token price not found");
       tokenPrice = tokenPriceResult.data[tokenMint].price;
     } catch (error: any) {
-      console.log("Fetching token price failed. Trying dexscreener...");
+      console.log("Fetching token price failed. Trying birdseye...");
 
       const options = {
         method: "GET",
@@ -86,17 +75,35 @@ const getTokenInfo = async (tokenMint: string) => {
       }
     }
 
+    return { tokenPrice, solPrice };
+  } catch (error: any) {
+    console.log("Error in getTokenPrice", error.message);
+    return { tokenPrice: 0, solPrice: 0 };
+  }
+};
+
+const getTotalSupply = async (tokenMint: string) => {
+  try {
+    const connection = new Connection(process.env.BACKEND_RPC!);
+
+    const accountInfoResult: any = await connection.getParsedAccountInfo(
+      new PublicKey(tokenMint)
+    );
+
+    if (!accountInfoResult.value) {
+      console.log("accountInfoResult", accountInfoResult);
+      throw new Error("Account info not found");
+    }
+
     const accountInfo = (accountInfoResult.value?.data as any).parsed.info;
     const decimals = accountInfo.decimals;
     const totalSupply = parseInt(accountInfo.supply) / 10 ** decimals;
 
     if (!totalSupply) throw new Error("Total supply not found");
-    const marketCap = Math.floor(totalSupply * tokenPrice).toLocaleString();
-
-    return { marketCap, tokenPrice, solPrice };
+    return totalSupply;
   } catch (error: any) {
-    console.log("Error in getTokenInfo", error.message);
-    return { marketCap: 0, tokenPrice: 0, solPrice: 0 };
+    console.log("Error in getTotalSupply", error.message);
+    return 0;
   }
 };
 
@@ -142,7 +149,7 @@ const callback = async (data: any) => {
       if (preTokenAmount >= postTokenAmount) continue;
 
       const isNewHolder = preTokenAmount === 0;
-      const amount = Math.abs(postTokenAmount - preTokenAmount);
+      const amount = postTokenAmount - preTokenAmount;
       const positionIncrease = (amount * 100) / preTokenAmount;
 
       tokenChanges[mint] = {
@@ -161,11 +168,15 @@ const callback = async (data: any) => {
       const tokenMint = listeningGroup.tokenMint;
       const tokenChange = tokenChanges[tokenMint];
 
-      if (tokenChange.amount < listeningGroup.minValue) {
+      const { tokenPrice, solPrice } = await getTokenPrice(tokenMint);
+
+      if (tokenChange.amount * tokenPrice < listeningGroup.minValue) {
         continue;
       }
 
-      const { marketCap, tokenPrice, solPrice } = await getTokenInfo(tokenMint);
+      const totalSupply = await getTotalSupply(tokenMint);
+      const marketCap = Math.floor(totalSupply * tokenPrice).toLocaleString();
+
       let {
         groupId,
         image,
@@ -206,14 +217,11 @@ const callback = async (data: any) => {
 
       let emojis = "";
       const times = Math.min(
-        Math.floor(tokenChange.amount / minValue),
+        Math.floor(parseFloat(spentUsd) / minValue),
         remainingLength / minValueEmojis.length
       );
       for (let i = 0; i < times; i++) emojis += minValueEmojis;
 
-      // emojis = emojis.match(/.{1,20}/g)?.join("\n") || "";
-
-      // emojis = emojis.slice(0, remainingLength);
       caption = caption.replace("__emojis__", emojis);
 
       if (!messageQueues[groupId]) {
