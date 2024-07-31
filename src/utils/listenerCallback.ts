@@ -121,6 +121,9 @@ const callback = async (data: any) => {
       return;
     }
 
+    const logMessages = data.transaction.meta.logMessages;
+    if (!logMessages.includes("Instruction: Swap")) return;
+
     const signer = data.transaction.transaction.message.accountKeys.find(
       (acc: any) => acc.signer
     ).pubkey;
