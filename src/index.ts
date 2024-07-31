@@ -47,26 +47,35 @@ function sendRequest(ws: WebSocket) {
   ws.send(JSON.stringify(request));
 }
 
+let ws: WebSocket;
+let pingInterval: string | number | NodeJS.Timeout | undefined;
+let pongTimeout: string | number | NodeJS.Timeout | undefined;
+
 function startPing(ws: WebSocket) {
-  setInterval(() => {
+  pingInterval = setInterval(() => {
     if (ws.readyState === WebSocket.OPEN) {
-      console.log("Sending ping...");
-      ws.ping(undefined, undefined, (err) => {
-        if (err) {
-          console.log("Failed to send ping:", err);
-        }
-      });
-    } else {
-      console.log("WebSocket is not open");
+      ws.ping();
+      console.log("Ping sent");
+
+      pongTimeout = setTimeout(() => {
+        console.error("Pong not received in time, closing connection");
+        ws.terminate();
+      }, 5000);
     }
-  }, 15000);
+  }, 30000);
+}
+
+function cleanupWebSocket() {
+  clearInterval(pingInterval);
+  clearTimeout(pongTimeout);
+  if (ws) {
+    ws.terminate();
+  }
 }
 
 function initializeWebSocket() {
   console.log("Initializing WebSocket...");
-  const ws = new WebSocket(
-    `wss://atlas-mainnet.helius-rpc.com/?api-key=${apiKey}`
-  );
+  ws = new WebSocket(`wss://atlas-mainnet.helius-rpc.com/?api-key=${apiKey}`);
 
   ws.on("open", function open() {
     console.log("WebSocket is open");
@@ -75,7 +84,6 @@ function initializeWebSocket() {
   });
 
   ws.on("message", async function incoming(data) {
-    // console.log("Received message");
     const messageStr = data.toString("utf8");
     try {
       const messageObj = JSON.parse(messageStr);
@@ -88,13 +96,20 @@ function initializeWebSocket() {
     }
   });
 
+  ws.on("pong", function pong() {
+    console.log("Pong received");
+    clearTimeout(pongTimeout);
+  });
+
   ws.on("error", function error(err) {
     console.log("WebSocket error:", err);
+    cleanupWebSocket();
   });
 
   ws.on("close", function close() {
-    console.log("WebSocket is closed, attempting to restart...");
-    setTimeout(initializeWebSocket, 5000); // Restart after 5 second
+    console.log("WebSocket is closed");
+    cleanupWebSocket();
+    setTimeout(initializeWebSocket, 5000);
   });
 }
 
@@ -104,6 +119,20 @@ export const messageQueues: {
   [key: number]: Array<{ image: string; caption: string }>;
 } = {};
 export const messageTimestamps: { [key: number]: Array<number> } = {};
+
+const cleanUpInactiveGroups = () => {
+  const now = Date.now();
+  Object.keys(messageTimestamps).forEach(groupId => {
+    const parsedGroupId = Number(groupId);
+    
+    if (messageTimestamps[parsedGroupId].every(timestamp => now - timestamp > 60000)) {
+      delete messageQueues[parsedGroupId];
+      delete messageTimestamps[parsedGroupId];
+    }
+  });
+};
+
+setInterval(cleanUpInactiveGroups, 600000);
 
 const sendQueuedMessages = async (groupId: number) => {
   const now = Date.now();
@@ -126,10 +155,10 @@ const sendQueuedMessages = async (groupId: number) => {
 
     try {
       console.log(`Sending message to group ${groupId}`);
-      await bot.telegram.sendPhoto(groupId, message.image, {
-        caption: message.caption,
-        parse_mode: "Markdown",
-      });
+      // await bot.telegram.sendPhoto(groupId, message.image, {
+      //   caption: message.caption,
+      //   parse_mode: "Markdown",
+      // });
       messages.shift();
       messageTimestamps[groupId].push(now);
     } catch (error) {
