@@ -22,56 +22,57 @@ setInterval(() => {
   );
 }, 60000); // Log every minute
 
-function sendRequest(ws: WebSocket) {
-  const request = {
-    jsonrpc: "2.0",
-    id: 420,
-    method: "transactionSubscribe",
-    params: [
-      {
-        accountInclude: [
-          "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo",
-          "Eo7WjKq67rjJQSZxS6z3YkapzY3eMj6Xy8X5EQVn5UaB",
-        ],
-      },
-      {
-        vote: false,
-        failed: false,
-        commitment: "finalized",
-        encoding: "jsonParsed",
-        transactionDetails: "full",
-        maxSupportedTransactionVersion: 0,
-      },
-    ],
-  };
-  ws.send(JSON.stringify(request));
-}
-
-function startPing(ws: WebSocket) {
-  setInterval(() => {
-    if (ws.readyState === WebSocket.OPEN) {
-      console.log("Sending ping...");
-      ws.ping(undefined, undefined, (err) => {
-        if (err) {
-          console.log("Failed to send ping:", err);
-        }
-      });
-    } else {
-      console.log("WebSocket is not open");
-    }
-  }, 15000);
-}
+let ws: WebSocket;
+let pingInterval: any;
+let pongTimeout: any;
 
 function initializeWebSocket() {
   console.log("Initializing WebSocket...");
-  const ws = new WebSocket(
-    `wss://atlas-mainnet.helius-rpc.com/?api-key=${apiKey}`
-  );
+  ws = new WebSocket(`wss://atlas-mainnet.helius-rpc.com/?api-key=${apiKey}`);
+
+  function sendRequest() {
+    const request = {
+      jsonrpc: "2.0",
+      id: 420,
+      method: "transactionSubscribe",
+      params: [
+        {
+          accountInclude: [
+            "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo",
+            "Eo7WjKq67rjJQSZxS6z3YkapzY3eMj6Xy8X5EQVn5UaB",
+          ],
+        },
+        {
+          vote: false,
+          failed: false,
+          commitment: "finalized",
+          encoding: "jsonParsed",
+          transactionDetails: "full",
+          maxSupportedTransactionVersion: 0,
+        },
+      ],
+    };
+    ws.send(JSON.stringify(request));
+  }
+
+  function startPing() {
+    pingInterval = setInterval(() => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.ping();
+        console.log("Ping sent");
+
+        pongTimeout = setTimeout(() => {
+          console.error("Pong not received in time, closing connection");
+          ws.terminate();
+        }, 5000);
+      }
+    }, 30000);
+  }
 
   ws.on("open", function open() {
     console.log("WebSocket is open");
-    sendRequest(ws);
-    startPing(ws);
+    sendRequest();
+    startPing();
   });
 
   ws.on("message", async function incoming(data) {
@@ -80,12 +81,19 @@ function initializeWebSocket() {
     try {
       const messageObj = JSON.parse(messageStr);
 
-      if (messageObj?.params) {
+      if (messageObj?.params?.result?.transaction) {
         await callback(messageObj.params.result);
+      } else {
+        console.log("Received message:", messageObj);
       }
     } catch (e) {
       console.log("Failed to parse JSON:", e);
     }
+  });
+
+  ws.on("pong", function pong() {
+    console.log("Pong received");
+    clearTimeout(pongTimeout);
   });
 
   ws.on("error", function error(err) {
@@ -94,7 +102,9 @@ function initializeWebSocket() {
 
   ws.on("close", function close() {
     console.log("WebSocket is closed, attempting to restart...");
-    setTimeout(initializeWebSocket, 5000); // Restart after 5 second
+    clearInterval(pingInterval);
+    clearTimeout(pongTimeout);
+    setTimeout(initializeWebSocket, 5000);
   });
 }
 
