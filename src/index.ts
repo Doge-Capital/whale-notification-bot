@@ -25,7 +25,7 @@ setInterval(() => {
 function initializeWebSocket() {
   let lastMessageDate = new Date();
   let ws: WebSocket;
-  let statusCheckInterval: any; 
+  let statusCheckInterval: any;
   let pingInterval: any;
   let pongTimeout: any;
 
@@ -100,6 +100,9 @@ function initializeWebSocket() {
         await callback(messageObj.params.result);
       } else {
         console.log("Received message:", messageObj);
+        if (messageObj?.params?.error) {
+          ws.terminate();
+        }
       }
     } catch (e) {
       console.log("Failed to parse JSON:", e);
@@ -227,7 +230,10 @@ bot.command("list", async (ctx) => {
       `\n[Mint Address](${tokenUrl})`;
   });
 
-  await ctx.reply(message, { parse_mode: "Markdown" });
+  await ctx.reply(message, {
+    parse_mode: "Markdown",
+    link_preview_options: { is_disabled: true },
+  });
 });
 
 bot.command("register", async (ctx) => {
@@ -324,7 +330,7 @@ bot.command("register", async (ctx) => {
 
       await ctx.reply(
         `Registered Token\nName: *${name}*\nSymbol: *${symbol}*\nMinimum Value: *$${minValue}*\n[Mint Address](${tokenUrl})`,
-        { parse_mode: "Markdown" }
+        { parse_mode: "Markdown", link_preview_options: { is_disabled: true } }
       );
     } catch (err: any) {
       if (err.code === 11000) {
