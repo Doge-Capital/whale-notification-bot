@@ -7,6 +7,7 @@ import WebSocket from "ws";
 import Token from "./models/token";
 import connectToDatabase from "./utils/database";
 import callback from "./utils/listenerCallback";
+import emojiRegex from 'emoji-regex';
 
 configDotenv();
 
@@ -219,7 +220,7 @@ bot.command("list", async (ctx) => {
   let message = "*Registered Tokens*";
   let count = 1;
   tokens.forEach((token) => {
-    let { tokenMint, name, symbol, minValue, poolAddress } = token;
+    let { tokenMint, name, symbol, minValue, minValueEmojis } = token;
 
     const tokenUrl = `https://solscan.io/token/${tokenMint}`;
 
@@ -227,6 +228,7 @@ bot.command("list", async (ctx) => {
       `\n\n${count++}. ${name}` +
       `\nSymbol: *${symbol}*` +
       `\nMinimum Value: *$${minValue}*` +
+      `\nEmoji: ${minValueEmojis}` +
       `\n[Mint Address](${tokenUrl})`;
   });
 
@@ -316,6 +318,8 @@ bot.command("register", async (ctx) => {
         return;
       }
 
+      const minValueEmojis = "🟢🟢";
+
       await Token.create({
         groupId,
         tokenMint,
@@ -323,13 +327,14 @@ bot.command("register", async (ctx) => {
         symbol,
         image,
         minValue,
+        minValueEmojis,
         poolAddress: pool.address,
       });
 
       const tokenUrl = `https://solscan.io/token/${tokenMint}`;
 
       await ctx.reply(
-        `Registered Token\nName: *${name}*\nSymbol: *${symbol}*\nMinimum Value: *$${minValue}*\n[Mint Address](${tokenUrl})`,
+        `Registered Token\nName: *${name}*\nSymbol: *${symbol}*\nMinimum Value: *$${minValue}*\nEmoji ${minValueEmojis}\n[Mint Address](${tokenUrl})`,
         { parse_mode: "Markdown", link_preview_options: { is_disabled: true } }
       );
     } catch (err: any) {
@@ -377,6 +382,52 @@ bot.command("unregister", async (ctx) => {
       }
     } catch (err: any) {
       await ctx.reply("An error occurred while unregistering the token.");
+    }
+  } catch (error: any) {
+    console.log(error.message);
+    await ctx.reply(error.message);
+  }
+});
+
+bot.command("setemoji", async (ctx) => {
+  try {
+    console.log("setemoji message:", ctx.message.text);
+    const messageText = ctx.message.text;
+    const params = messageText.split(" ");
+
+    if (params.length !== 3) {
+      await ctx.reply("Usage: /setemoji <token_mint> <emoji>");
+      return;
+    }
+
+    const [command, tokenMint, minValueEmojis] = params;
+
+    function containsOnlyEmojis(input: string): boolean {
+      const regex = emojiRegex();
+      const matches = input.match(regex);
+    
+      return matches !== null && matches.join('') === input;
+    }
+
+    if (
+      !containsOnlyEmojis(minValueEmojis)
+    ) {
+      await ctx.reply("Please provide valid emojis.");
+      return;
+    }
+
+    await connectToDatabase();
+    const result = await Token.updateOne(
+      { groupId: ctx.chat.id, tokenMint },
+      { minValueEmojis }
+    );
+
+    if (result.modifiedCount === 0) {
+      await ctx.reply(
+        `Token: ${tokenMint} has not been registered for this group.`
+      );
+    } else {
+      await ctx.reply(`Set Emojis: ${minValueEmojis} for Token: ${tokenMint}`);
     }
   } catch (error: any) {
     console.log(error.message);
