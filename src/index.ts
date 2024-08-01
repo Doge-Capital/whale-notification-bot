@@ -212,7 +212,7 @@ bot.command("list", async (ctx) => {
       `\n[Mint Address](${tokenUrl}) | [Meteora Pool](${poolUrl})`;
   });
 
-  await ctx.reply(message);
+  await ctx.reply(message, { parse_mode: "Markdown" });
 });
 
 bot.command("register", async (ctx) => {
@@ -309,7 +309,8 @@ bot.command("register", async (ctx) => {
       const poolUrl = `https://solscan.io/account/${pool.address}`;
 
       await ctx.reply(
-        `Registered Token\nName: *${name}*\nSymbol: *${symbol}*\nMinimum Value: *$${minValue}*\n[Mint Address](${tokenUrl}) | [Meteora Pool](${poolUrl})`
+        `Registered Token\nName: *${name}*\nSymbol: *${symbol}*\nMinimum Value: *$${minValue}*\n[Mint Address](${tokenUrl}) | [Meteora Pool](${poolUrl})`,
+        { parse_mode: "Markdown" }
       );
     } catch (err: any) {
       if (err.code === 11000) {
