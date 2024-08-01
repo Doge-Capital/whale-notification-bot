@@ -124,8 +124,8 @@ const callback = async (data: any) => {
     const logMessages: string[] = data.transaction.meta.logMessages;
     if (!logMessages.some((log) => log.includes("Instruction: Swap"))) return;
 
-    if(!data.transaction.transaction){
-      console.log('data.transaction.transaction not found', data);
+    if (!data.transaction.transaction) {
+      console.log("data.transaction.transaction not found", data);
       return;
     }
     const signer = data.transaction.transaction.message.accountKeys.find(

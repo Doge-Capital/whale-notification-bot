@@ -22,11 +22,13 @@ setInterval(() => {
   );
 }, 60000); // Log every minute
 
-let ws: WebSocket;
-let pingInterval: any;
-let pongTimeout: any;
-
 function initializeWebSocket() {
+  let lastMessageDate = new Date();
+  let ws: WebSocket;
+  let statusCheckInterval: any; 
+  let pingInterval: any;
+  let pongTimeout: any;
+
   console.log("Initializing WebSocket...");
   ws = new WebSocket(`wss://atlas-mainnet.helius-rpc.com/?api-key=${apiKey}`);
 
@@ -62,17 +64,29 @@ function initializeWebSocket() {
         console.log("Ping sent");
 
         pongTimeout = setTimeout(() => {
-          console.error("Pong not received in time, closing connection");
+          console.log("Pong not received in time, closing connection");
           ws.terminate();
         }, 5000);
       }
     }, 30000);
   }
 
+  function statusCheck() {
+    statusCheckInterval = setInterval(() => {
+      if (lastMessageDate.getTime() < Date.now() - 20000) {
+        console.log(
+          "No messages received in the last 20 seconds, closing connection"
+        );
+        ws.terminate();
+      }
+    }, 20000);
+  }
+
   ws.on("open", function open() {
     console.log("WebSocket is open");
     sendRequest();
     startPing();
+    statusCheck();
   });
 
   ws.on("message", async function incoming(data) {
@@ -82,6 +96,7 @@ function initializeWebSocket() {
       const messageObj = JSON.parse(messageStr);
 
       if (messageObj?.params?.result?.transaction) {
+        lastMessageDate = new Date();
         await callback(messageObj.params.result);
       } else {
         console.log("Received message:", messageObj);
@@ -102,6 +117,7 @@ function initializeWebSocket() {
 
   ws.on("close", function close() {
     console.log("WebSocket is closed, attempting to restart...");
+    clearInterval(statusCheckInterval);
     clearInterval(pingInterval);
     clearTimeout(pongTimeout);
     setTimeout(initializeWebSocket, 5000);
@@ -143,7 +159,7 @@ const sendQueuedMessages = async (groupId: number) => {
       messages.shift();
       messageTimestamps[groupId].push(now);
     } catch (error) {
-      console.error(`Failed to send message to group ${groupId}:`, error);
+      console.log(`Failed to send message to group ${groupId}:`, error);
       // Retry after 1 minute to avoid spamming retries on persistent errors
       setTimeout(() => sendQueuedMessages(groupId), 40000);
       return;
@@ -203,13 +219,12 @@ bot.command("list", async (ctx) => {
     let { tokenMint, name, symbol, minValue, poolAddress } = token;
 
     const tokenUrl = `https://solscan.io/token/${tokenMint}`;
-    const poolUrl = `https://solscan.io/account/${poolAddress}`;
 
     message +=
       `\n\n${count++}. ${name}` +
       `\nSymbol: *${symbol}*` +
       `\nMinimum Value: *$${minValue}*` +
-      `\n[Mint Address](${tokenUrl}) | [Meteora Pool](${poolUrl})`;
+      `\n[Mint Address](${tokenUrl})`;
   });
 
   await ctx.reply(message, { parse_mode: "Markdown" });
@@ -306,10 +321,9 @@ bot.command("register", async (ctx) => {
       });
 
       const tokenUrl = `https://solscan.io/token/${tokenMint}`;
-      const poolUrl = `https://solscan.io/account/${pool.address}`;
 
       await ctx.reply(
-        `Registered Token\nName: *${name}*\nSymbol: *${symbol}*\nMinimum Value: *$${minValue}*\n[Mint Address](${tokenUrl}) | [Meteora Pool](${poolUrl})`,
+        `Registered Token\nName: *${name}*\nSymbol: *${symbol}*\nMinimum Value: *$${minValue}*\n[Mint Address](${tokenUrl})`,
         { parse_mode: "Markdown" }
       );
     } catch (err: any) {
@@ -365,7 +379,7 @@ bot.command("unregister", async (ctx) => {
 });
 
 bot.catch((err) => {
-  console.error("Error occurred", err);
+  console.log("Error occurred", err);
 });
 
 bot.launch().then(() => console.log("Bot started!"));
