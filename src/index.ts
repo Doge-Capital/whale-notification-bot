@@ -197,9 +197,19 @@ bot.command("list", async (ctx) => {
     return;
   }
 
-  let message = "Registered tokens:\n";
+  let message = "*Registered Tokens*";
+  let count = 1;
   tokens.forEach((token) => {
-    message += `Token: ${token.tokenMint}, Minimum Value: ${token.minValue}\n`;
+    let { tokenMint, name, symbol, minValue, poolAddress } = token;
+
+    const tokenUrl = `https://solscan.io/token/${tokenMint}`;
+    const poolUrl = `https://solscan.io/account/${poolAddress}`;
+
+    message +=
+      `\n\n${count++}. ${name}` +
+      `\nSymbol: *${symbol}*` +
+      `\nMinimum Value: *$${minValue}*` +
+      `\n[Mint Address](${tokenUrl}) | [Meteora Pool](${poolUrl})`;
   });
 
   await ctx.reply(message);
@@ -295,8 +305,11 @@ bot.command("register", async (ctx) => {
         poolAddress: pool.address,
       });
 
+      const tokenUrl = `https://solscan.io/token/${tokenMint}`;
+      const poolUrl = `https://solscan.io/account/${pool.address}`;
+
       await ctx.reply(
-        `Registered token: ${tokenMint}, with minimum value: ${minValue}`
+        `Registered Token\nName: *${name}*\nSymbol: *${symbol}*\nMinimum Value: *$${minValue}*\n[Mint Address](${tokenUrl}) | [Meteora Pool](${poolUrl})`
       );
     } catch (err: any) {
       if (err.code === 11000) {
@@ -339,7 +352,7 @@ bot.command("unregister", async (ctx) => {
           `Token: ${tokenMint} has not been registered for this group.`
         );
       } else {
-        await ctx.reply(`Unregistered token: ${tokenMint}`);
+        await ctx.reply(`Unregistered Token: ${tokenMint}`);
       }
     } catch (err: any) {
       await ctx.reply("An error occurred while unregistering the token.");
