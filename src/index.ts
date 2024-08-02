@@ -339,6 +339,11 @@ bot.action(/add_/, async (ctx) => {
 
 bot.hears(/^(?!\/).*/, async (ctx) => {
   try {
+    // if not a private message return
+    if (ctx.chat.type !== "private") {
+      return;
+    }
+    
     let message = ctx.message.text;
     if (message.startsWith("/")) {
       return;
