@@ -2,7 +2,7 @@ import { Metaplex } from "@metaplex-foundation/js";
 import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { Connection, PublicKey } from "@solana/web3.js";
 import { configDotenv } from "dotenv";
-import { Telegraf } from "telegraf";
+import { Telegraf, Markup } from "telegraf";
 import WebSocket from "ws";
 import Token from "./models/token";
 import connectToDatabase from "./utils/database";
@@ -343,7 +343,7 @@ bot.hears(/^(?!\/).*/, async (ctx) => {
     if (ctx.chat.type !== "private") {
       return;
     }
-    
+
     let message = ctx.message.text;
     if (message.startsWith("/")) {
       return;
@@ -540,3 +540,53 @@ bot.catch((err) => {
 });
 
 bot.launch().then(() => console.log("Bot started!"));
+
+bot.command("setup", async (ctx) => {
+  //if not a private message return
+  if (ctx.chat.type !== "private") {
+    await ctx.reply("*This command can only be used in private messages*", {
+      parse_mode: "Markdown",
+    });
+    return;
+  }
+
+  ctx.reply(
+    "*💫 Fast Setup*\nTo begin, click below and select the group you want to attach your portal to\n\n_(The bot will be automatically added as admin)_",
+    {
+      parse_mode: "Markdown",
+      ...Markup.keyboard([
+        [
+          {
+            text: "➡️ Select a group",
+            request_chat: {
+              request_id: 1,
+              chat_is_channel: false, // Only groups, not channels
+              user_administrator_rights: {
+                is_anonymous: false,
+                can_manage_chat: true,
+                can_delete_messages: true,
+                can_manage_video_chats: true,
+                can_restrict_members: true,
+                can_promote_members: true,
+                can_change_info: true,
+                can_invite_users: true,
+              },
+              bot_administrator_rights: {
+                is_anonymous: false,
+                can_manage_chat: true,
+                can_delete_messages: true,
+                can_manage_video_chats: false,
+                can_restrict_members: true,
+                can_promote_members: true,
+                can_change_info: true,
+                can_invite_users: true,
+              },
+            },
+          },
+        ],
+      ])
+        .oneTime()
+        .resize(),
+    }
+  );
+});
