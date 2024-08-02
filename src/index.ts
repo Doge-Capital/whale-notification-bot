@@ -7,21 +7,14 @@ import WebSocket from "ws";
 import Token from "./models/token";
 import connectToDatabase from "./utils/database";
 import callback from "./utils/listenerCallback";
-import emojiRegex from 'emoji-regex';
+import emojiRegex from "emoji-regex";
+import UserState from "./models/userState";
 
 configDotenv();
 
 const bot = new Telegraf(process.env.BOT_TOKEN!);
 
 const apiKey = process.env.HELIUS_API_KEY;
-
-// Memory usage logging
-setInterval(() => {
-  const memoryUsage = process.memoryUsage();
-  console.log(
-    `Memory Usage: RSS=${memoryUsage.rss}, HeapTotal=${memoryUsage.heapTotal}, HeapUsed=${memoryUsage.heapUsed}`
-  );
-}, 60000); // Log every minute
 
 function initializeWebSocket() {
   let lastMessageDate = new Date();
@@ -199,99 +192,198 @@ const handleQueuedMessages = () => {
 
 handleQueuedMessages();
 
-bot.start((ctx) => {
-  if (ctx.chat.type === "private") {
-    ctx.reply("Welcome to Whale Notifier Bot!");
-  } else if (ctx.chat.type === "group" || ctx.chat.type === "supergroup") {
-    ctx.reply("Whale Notifier Bot has been added to this group!");
+bot.start(async (ctx) => {
+  const [command, groupId] = ctx.payload.split("_");
+
+  if (command === "config" && groupId) {
+    await connectToDatabase();
+    const tokens = await Token.find({ groupId });
+
+    const inline_keyboard = [
+      ...tokens.map((token) => {
+        return [
+          {
+            text: token.name.toUpperCase(),
+            callback_data: `tokenSettings_${token._id}`,
+          },
+        ];
+      }),
+    ];
+
+    if (tokens.length < 4)
+      inline_keyboard.push([
+        { text: "➕ Add New Token", callback_data: `add_${groupId}` },
+      ]);
+
+    await ctx.reply(
+      "*Active Tokens*\n\nTrack upto 4 tokens at once with @MeteoraWhaleBot",
+      {
+        reply_markup: {
+          inline_keyboard,
+        },
+        parse_mode: "Markdown",
+      }
+    );
+  } else {
+    await ctx.reply("*Welcome to Whale Notifier Bot!*", {
+      parse_mode: "Markdown",
+    });
   }
+  return;
 });
 
-bot.command("list", async (ctx) => {
+bot.action(/tokenSettings_/, async (ctx) => {
+  const [command, id] = ctx.match.input.split("_");
+
   await connectToDatabase();
+  const token = await Token.findById(id);
 
-  const tokens = await Token.find({ groupId: ctx.chat.id });
-
-  if (tokens.length === 0) {
-    await ctx.reply("No tokens have been registered for this group.");
+  if (!token) {
+    await ctx.reply("*Token not found.*", { parse_mode: "Markdown" });
     return;
   }
 
-  let message = "*Registered Tokens*";
-  let count = 1;
-  tokens.forEach((token) => {
-    let { tokenMint, name, symbol, minValue, minValueEmojis } = token;
+  await ctx.editMessageText(
+    `Token Settings: [${token.name}](https://solscan.io/token/${token.tokenMint})`,
+    {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            {
+              text: `Set Emoji ${token.minValueEmojis}`,
+              callback_data: `setEmoji_${id}`,
+            },
+            {
+              text: `💸 Buy Amount $${token.minValue}`,
+              callback_data: `buyAmount_${id}`,
+            },
+          ],
+          [
+            {
+              text: "🚮 Delete Token",
+              callback_data: `delete_${id}`,
+            },
+          ],
+        ],
+      },
+      parse_mode: "Markdown",
+      link_preview_options: { is_disabled: true },
+    }
+  );
+  return;
+});
 
-    const tokenUrl = `https://solscan.io/token/${tokenMint}`;
+bot.action(/setEmoji_/, async (ctx) => {
+  const [command, id] = ctx.match.input.split("_");
 
-    message +=
-      `\n\n${count++}. ${name}` +
-      `\nSymbol: *${symbol}*` +
-      `\nMinimum Value: *$${minValue}*` +
-      `\nEmoji: ${minValueEmojis}` +
-      `\n[Mint Address](${tokenUrl})`;
-  });
-
-  await ctx.reply(message, {
+  await connectToDatabase();
+  await UserState.findOneAndUpdate(
+    { userId: ctx.from.id },
+    {
+      $set: {
+        state: `setEmoji_${id}`,
+      },
+    },
+    { upsert: true }
+  );
+  await ctx.reply("*⚙️ Send emoji to appear on buys*", {
     parse_mode: "Markdown",
-    link_preview_options: { is_disabled: true },
   });
 });
 
-bot.command("register", async (ctx) => {
+bot.action(/buyAmount/, async (ctx) => {
+  const [command, id] = ctx.match.input.split("_");
+
+  await connectToDatabase();
+  await UserState.findOneAndUpdate(
+    { userId: ctx.from.id },
+    {
+      $set: {
+        state: `buyAmount_${id}`,
+      },
+    },
+    { upsert: true }
+  );
+  await ctx.reply("*⚙️ Send new minimum buy amount*", {
+    parse_mode: "Markdown",
+  });
+});
+
+bot.action(/delete_/, async (ctx) => {
+  const [command, id] = ctx.match.input.split("_");
+
+  await connectToDatabase();
+  const result = await Token.findByIdAndDelete(id);
+
+  if (result) {
+    await ctx.reply("*Token deleted successfully*", {
+      parse_mode: "Markdown",
+    });
+  }
+  return;
+});
+
+bot.action(/add_/, async (ctx) => {
+  const groupId = ctx.match.input.split("_")[1];
+  await connectToDatabase();
+  await UserState.findOneAndUpdate(
+    { userId: ctx.from.id },
+    { groupId, state: "addToken" },
+    { upsert: true }
+  );
+
+  await ctx.reply(`*⚙️ Send the token address to track*`, {
+    parse_mode: "Markdown",
+  });
+});
+
+bot.hears(/^(?!\/).*/, async (ctx) => {
   try {
-    const messageText = ctx.message.text;
-    console.log("register message:", messageText);
-
-    const params = messageText.split(" ");
-
-    if (params.length !== 3) {
-      await ctx.reply("Usage: /register <token_mint> <min_value>");
-      return;
-    }
-
-    let [command, tokenMint, minValueStr] = params;
-
-    // Remove non-alphanumeric characters
-    tokenMint = tokenMint.replace(/[^a-zA-Z0-9]/g, "");
-    minValueStr = minValueStr.replace(/[^a-zA-Z0-9]/g, "");
-
-    const minValue = Number(minValueStr);
-
-    if (isNaN(minValue)) {
-      await ctx.reply("Please provide a valid number for the minimum value.");
-      return;
-    }
-
-    const mintAddress = new PublicKey(tokenMint);
-
-    const connection = new Connection(process.env.BACKEND_RPC!);
-    const metaplex = Metaplex.make(connection);
-
-    const accInfo = await connection.getAccountInfo(mintAddress);
-    if (!accInfo?.owner.equals(TOKEN_PROGRAM_ID)) {
-      await ctx.reply("Please provide a valid token mint address.");
-      return;
-    }
-
-    const metadataAccount = metaplex
-      .nfts()
-      .pdas()
-      .metadata({ mint: mintAddress });
-
-    const metadataAccountInfo = await connection.getAccountInfo(
-      metadataAccount
-    );
-    if (!metadataAccountInfo) {
-      await ctx.reply("Metadata account info not found.");
+    let message = ctx.message.text;
+    if (message.startsWith("/")) {
       return;
     }
 
     await connectToDatabase();
+    const userState = await UserState.findOne({ userId: ctx.from.id });
+    if (!userState) {
+      return;
+    }
 
-    const groupId = ctx.chat.id;
+    const [state, id] = userState.state.split("_");
 
-    try {
+    if (state === "addToken") {
+      //check if token mint is valid
+      let tokenMint = message.replace(/[^a-zA-Z0-9]/g, "");
+
+      const mintAddress = new PublicKey(tokenMint);
+
+      const connection = new Connection(process.env.BACKEND_RPC!);
+      const metaplex = Metaplex.make(connection);
+
+      const accInfo = await connection.getAccountInfo(mintAddress);
+      if (!accInfo?.owner.equals(TOKEN_PROGRAM_ID)) {
+        await ctx.reply("*Please provide a valid token mint address*", {
+          parse_mode: "Markdown",
+        });
+        return;
+      }
+
+      const metadataAccount = metaplex
+        .nfts()
+        .pdas()
+        .metadata({ mint: mintAddress });
+
+      const metadataAccountInfo = await connection.getAccountInfo(
+        metadataAccount
+      );
+      if (!metadataAccountInfo) {
+        await ctx.reply("*Metadata account info not found*", {
+          parse_mode: "Markdown",
+        });
+        return;
+      }
+
       const token = await metaplex.nfts().findByMint({ mintAddress });
       const name = token.name;
       const symbol = token.symbol;
@@ -305,7 +397,9 @@ bot.command("register", async (ctx) => {
         (p: any) => p.mint_x === tokenMint || p.mint_y === tokenMint
       );
       if (tokenPools.length === 0) {
-        await ctx.reply("No meteora pool found for this token.");
+        await ctx.reply("*No meteora pool found for this token*", {
+          parse_mode: "Markdown",
+        });
         return;
       }
       //get pool with highest liquidity
@@ -314,22 +408,37 @@ bot.command("register", async (ctx) => {
       });
 
       if (!pool) {
-        await ctx.reply("No pool found for this token.");
+        await ctx.reply("*No pool found for this token*", {
+          parse_mode: "Markdown",
+        });
         return;
       }
 
+      const minValue = 20;
       const minValueEmojis = "🟢🟢";
 
-      await Token.create({
-        groupId,
-        tokenMint,
-        name,
-        symbol,
-        image,
-        minValue,
-        minValueEmojis,
-        poolAddress: pool.address,
-      });
+      try {
+        await Token.create({
+          groupId: userState.groupId,
+          tokenMint,
+          name,
+          symbol,
+          image,
+          minValue,
+          minValueEmojis,
+          poolAddress: pool.address,
+        });
+      } catch (err: any) {
+        if (err.code === 11000) {
+          await ctx.reply(
+            `*Token: ${tokenMint} is already registered for this group*`,
+            { parse_mode: "Markdown" }
+          );
+        } else {
+          await ctx.reply(err.message);
+        }
+        return;
+      }
 
       const tokenUrl = `https://solscan.io/token/${tokenMint}`;
 
@@ -337,51 +446,59 @@ bot.command("register", async (ctx) => {
         `Registered Token\nName: *${name}*\nSymbol: *${symbol}*\nMinimum Value: *$${minValue}*\nEmoji ${minValueEmojis}\n[Mint Address](${tokenUrl})`,
         { parse_mode: "Markdown", link_preview_options: { is_disabled: true } }
       );
-    } catch (err: any) {
-      if (err.code === 11000) {
-        await ctx.reply(
-          `Token: ${tokenMint} has already been registered for this group.`
-        );
-      } else {
-        await ctx.reply(err.message);
+
+      await UserState.deleteOne({ userId: ctx.from.id });
+    } else if (state === "setEmoji") {
+      function containsOnlyEmojis(input: string): boolean {
+        const regex = emojiRegex();
+        const matches = input.match(regex);
+
+        return matches !== null && matches.join("") === input;
       }
-      return;
-    }
-  } catch (error: any) {
-    console.log(error.message);
-    await ctx.reply(error.message);
-  }
-});
 
-bot.command("unregister", async (ctx) => {
-  try {
-    console.log("unregister message:", ctx.message.text);
-    const messageText = ctx.message.text;
-    const params = messageText.split(" ");
+      if (!containsOnlyEmojis(message)) {
+        await ctx.reply("*Please provide valid emojis*", {
+          parse_mode: "Markdown",
+        });
+        return;
+      }
 
-    if (params.length !== 2) {
-      await ctx.reply("Usage: /unregister <token_mint>");
-      return;
-    }
-
-    const [command, tokenMint] = params;
-
-    try {
-      await connectToDatabase();
-      const result = await Token.deleteOne({
-        groupId: ctx.chat.id,
-        tokenMint,
+      const result = await Token.findByIdAndUpdate(id, {
+        $set: {
+          minValueEmojis: message,
+        },
       });
 
-      if (result.deletedCount === 0) {
-        await ctx.reply(
-          `Token: ${tokenMint} has not been registered for this group.`
-        );
+      if (result) {
+        await ctx.reply(`*Set Emojis: ${message} for Token: ${result.name}*`, {
+          parse_mode: "Markdown",
+        });
       } else {
-        await ctx.reply(`Unregistered Token: ${tokenMint}`);
+        await ctx.reply(`*Token not found*`, { parse_mode: "Markdown" });
       }
-    } catch (err: any) {
-      await ctx.reply("An error occurred while unregistering the token.");
+    } else if (state === "buyAmount") {
+      const minValue = Number(message);
+      if (isNaN(minValue)) {
+        await ctx.reply(
+          "*Please provide a valid number for the minimum value*",
+          { parse_mode: "Markdown" }
+        );
+        return;
+      }
+
+      const result = await Token.findByIdAndUpdate(id, {
+        $set: {
+          minValue,
+        },
+      });
+
+      if (result) {
+        await ctx.reply(`*Buy Amount: ${minValue} for Token: ${result.name}*`, {
+          parse_mode: "Markdown",
+        });
+      } else {
+        await ctx.reply(`*Token not found*`, { parse_mode: "Markdown" });
+      }
     }
   } catch (error: any) {
     console.log(error.message);
@@ -389,50 +506,28 @@ bot.command("unregister", async (ctx) => {
   }
 });
 
-bot.command("setemoji", async (ctx) => {
-  try {
-    console.log("setemoji message:", ctx.message.text);
-    const messageText = ctx.message.text;
-    const params = messageText.split(" ");
-
-    if (params.length !== 3) {
-      await ctx.reply("Usage: /setemoji <token_mint> <emoji>");
-      return;
-    }
-
-    const [command, tokenMint, minValueEmojis] = params;
-
-    function containsOnlyEmojis(input: string): boolean {
-      const regex = emojiRegex();
-      const matches = input.match(regex);
-    
-      return matches !== null && matches.join('') === input;
-    }
-
-    if (
-      !containsOnlyEmojis(minValueEmojis)
-    ) {
-      await ctx.reply("Please provide valid emojis.");
-      return;
-    }
-
-    await connectToDatabase();
-    const result = await Token.updateOne(
-      { groupId: ctx.chat.id, tokenMint },
-      { minValueEmojis }
-    );
-
-    if (result.modifiedCount === 0) {
-      await ctx.reply(
-        `Token: ${tokenMint} has not been registered for this group.`
-      );
-    } else {
-      await ctx.reply(`Set Emojis: ${minValueEmojis} for Token: ${tokenMint}`);
-    }
-  } catch (error: any) {
-    console.log(error.message);
-    await ctx.reply(error.message);
+bot.command("config", async (ctx) => {
+  if (ctx.chat.type === "private") {
+    await ctx.reply("*This command can only be used in groups*", {
+      parse_mode: "Markdown",
+    });
+    return;
   }
+  const groupId = ctx.chat.id;
+
+  await ctx.reply("*Click the button below to configure the bot*", {
+    reply_markup: {
+      inline_keyboard: [
+        [
+          {
+            text: "Configure Bot 🤖",
+            url: `https://t.me/${ctx.botInfo.username}?start=config_${groupId}`,
+          },
+        ],
+      ],
+    },
+    parse_mode: "Markdown",
+  });
 });
 
 bot.catch((err) => {
