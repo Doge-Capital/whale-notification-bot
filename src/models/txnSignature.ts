@@ -11,5 +11,7 @@ const txnSignatureSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+txnSignatureSchema.index({ createdAt: 1 }, { expireAfterSeconds: 600 });
+
 const TxnSignature = mongoose.model("TxnSignature", txnSignatureSchema);
 export default TxnSignature;
