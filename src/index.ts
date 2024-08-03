@@ -256,7 +256,7 @@ bot.action(/tokenSettings_/, async (ctx) => {
         inline_keyboard: [
           [
             {
-              text: `Set Emoji ${token.minValueEmojis}`,
+              text: `Set Emoji ${token.emojis}`,
               callback_data: `setEmoji_${id}`,
             },
             {
@@ -423,7 +423,7 @@ bot.hears(/^(?!\/).*/, async (ctx) => {
       }
 
       const minValue = 20;
-      const minValueEmojis = "🚀🚀";
+      const emojis = "🚀🚀";
 
       try {
         await Token.create({
@@ -433,7 +433,7 @@ bot.hears(/^(?!\/).*/, async (ctx) => {
           symbol,
           image,
           minValue,
-          minValueEmojis,
+          emojis,
           poolAddress: pool.address,
         });
       } catch (err: any) {
@@ -451,7 +451,7 @@ bot.hears(/^(?!\/).*/, async (ctx) => {
       const tokenUrl = `https://solscan.io/token/${tokenMint}`;
 
       await ctx.reply(
-        `Registered Token\nName: *${name}*\nSymbol: *${symbol}*\nMinimum Value: *$${minValue}*\nEmoji ${minValueEmojis}\n[Mint Address](${tokenUrl})`,
+        `Registered Token\nName: *${name}*\nSymbol: *${symbol}*\nMinimum Value: *$${minValue}*\nEmoji ${emojis}\n[Mint Address](${tokenUrl})`,
         { parse_mode: "Markdown", link_preview_options: { is_disabled: true } }
       );
 
@@ -473,7 +473,7 @@ bot.hears(/^(?!\/).*/, async (ctx) => {
 
       const result = await Token.findByIdAndUpdate(id, {
         $set: {
-          minValueEmojis: message,
+          emojis: message,
         },
       });
 

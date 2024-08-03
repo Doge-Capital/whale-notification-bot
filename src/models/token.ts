@@ -23,7 +23,7 @@ const tokenSchema = new mongoose.Schema(
       type: Number,
       required: true,
     },
-    minValueEmojis: {
+    emojis: {
       type: String,
       required: true,
     },

@@ -186,15 +186,8 @@ const callback = async (data: any) => {
       const totalSupply = await getTotalSupply(tokenMint);
       const marketCap = Math.floor(totalSupply * tokenPrice).toLocaleString();
 
-      let {
-        groupId,
-        image,
-        name,
-        symbol,
-        minValue,
-        minValueEmojis,
-        poolAddress,
-      } = listeningGroup;
+      let { groupId, image, name, symbol, minValue, emojis, poolAddress } =
+        listeningGroup;
 
       // Stock image if no image is provided
       image =
@@ -223,16 +216,16 @@ const callback = async (data: any) => {
         ` [Buy](${jupiterUrl}${tokenMint})`;
 
       let remainingLength = 1024 - caption.length;
-      remainingLength -= remainingLength % minValueEmojis.length;
+      remainingLength -= remainingLength % emojis.length;
 
-      let emojis = "";
+      let totalEmojis = "";
       const times = Math.min(
         Math.floor(parseFloat(spentUsd) / minValue),
-        remainingLength / minValueEmojis.length
+        remainingLength / emojis.length
       );
-      for (let i = 0; i < times; i++) emojis += minValueEmojis;
+      for (let i = 0; i < times; i++) totalEmojis += emojis;
 
-      caption = caption.replace("__emojis__", emojis);
+      caption = caption.replace("__emojis__", totalEmojis);
 
       // Add to message queue of the respective group
       if (!messageQueues[groupId]) {
