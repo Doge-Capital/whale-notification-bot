@@ -13,6 +13,7 @@ const buyerUrl = "https://solscan.io/account/";
 const dexTUrl = "https://www.dextools.io/app/en/solana/pair-explorer/";
 const solTrendingUrl = "https://t.me/SOLTRENDING";
 
+//Fetch token price from jupipter or birdseye
 const getTokenPrice = async (tokenMint: string) => {
   try {
     async function fetchTokenPrice(tokenMint: string) {
@@ -42,7 +43,6 @@ const getTokenPrice = async (tokenMint: string) => {
       }
     }
 
-    // Usage
     let tokenPrice: number,
       solPrice: number = 0;
     try {
@@ -82,6 +82,7 @@ const getTokenPrice = async (tokenMint: string) => {
   }
 };
 
+//Fetch total supply of token
 const getTotalSupply = async (tokenMint: string) => {
   try {
     const connection = new Connection(process.env.BACKEND_RPC!);
@@ -122,6 +123,7 @@ const callback = async (data: any) => {
     }
 
     const logMessages: string[] = data.transaction.meta.logMessages;
+    // Consider only swap transactions from meteora
     if (!logMessages.some((log) => log.includes("Instruction: Swap"))) return;
 
     if (!data.transaction.transaction) {
@@ -194,6 +196,7 @@ const callback = async (data: any) => {
         poolAddress,
       } = listeningGroup;
 
+      // Stock image if no image is provided
       image =
         image ||
         "https://static.vecteezy.com/system/resources/previews/006/153/238/original/solana-sol-logo-crypto-currency-purple-theme-background-neon-design-vector.jpg";
@@ -231,6 +234,7 @@ const callback = async (data: any) => {
 
       caption = caption.replace("__emojis__", emojis);
 
+      // Add to message queue of the respective group
       if (!messageQueues[groupId]) {
         messageQueues[groupId] = [];
       }

@@ -15,7 +15,9 @@ configDotenv();
 const bot = new Telegraf(process.env.BOT_TOKEN!);
 
 const apiKey = process.env.HELIUS_API_KEY;
+const maxTokensPerGroup = 4;
 
+// Initialize WebSocket connection to Helius
 function initializeWebSocket() {
   let lastMessageDate = new Date();
   let ws: WebSocket;
@@ -33,6 +35,7 @@ function initializeWebSocket() {
       method: "transactionSubscribe",
       params: [
         {
+          //Meteora Pools
           accountInclude: [
             "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo",
             "Eo7WjKq67rjJQSZxS6z3YkapzY3eMj6Xy8X5EQVn5UaB",
@@ -51,6 +54,7 @@ function initializeWebSocket() {
     ws.send(JSON.stringify(request));
   }
 
+  // Send a ping every 30 seconds to keep the connection alive
   function startPing() {
     pingInterval = setInterval(() => {
       if (ws.readyState === WebSocket.OPEN) {
@@ -65,6 +69,7 @@ function initializeWebSocket() {
     }, 30000);
   }
 
+  // Check if we have received any messages in the last 20 seconds
   function statusCheck() {
     statusCheckInterval = setInterval(() => {
       if (lastMessageDate.getTime() < Date.now() - 20000) {
@@ -84,7 +89,6 @@ function initializeWebSocket() {
   });
 
   ws.on("message", async function incoming(data) {
-    // console.log("Received message");
     const messageStr = data.toString("utf8");
     try {
       const messageObj = JSON.parse(messageStr);
@@ -112,6 +116,7 @@ function initializeWebSocket() {
     console.log("WebSocket error:", err);
   });
 
+  // Cleanup and restart the WebSocket connection if it's closed
   ws.on("close", function close() {
     console.log("WebSocket is closed, attempting to restart...");
     clearInterval(statusCheckInterval);
@@ -139,7 +144,7 @@ const sendQueuedMessages = async (groupId: number) => {
   // Check if we can send more messages
   if (messageTimestamps[groupId].length >= 20) {
     console.log(`Rate limit reached for group ${groupId}. Skipping...`);
-    setTimeout(() => sendQueuedMessages(groupId), 40000); // Retry after 1 minute
+    setTimeout(() => sendQueuedMessages(groupId), 40000); // Retry after 40 seconds
     return;
   }
 
@@ -157,7 +162,7 @@ const sendQueuedMessages = async (groupId: number) => {
       messageTimestamps[groupId].push(now);
     } catch (error) {
       console.log(`Failed to send message to group ${groupId}:`, error);
-      // Retry after 1 minute to avoid spamming retries on persistent errors
+      // Retry after 40 seconds to avoid spamming retries on persistent errors
       setTimeout(() => sendQueuedMessages(groupId), 40000);
       return;
     }
@@ -170,8 +175,8 @@ const sendQueuedMessages = async (groupId: number) => {
   }
 };
 
+// Continuously check for queued messages and send them
 const handleQueuedMessages = () => {
-  // console.log("Checking for queued messages...", Object.keys(messageQueues));
   Object.keys(messageQueues).forEach((groupId) => {
     const parsedGroupId = Number(groupId);
 
@@ -192,6 +197,7 @@ const handleQueuedMessages = () => {
 
 handleQueuedMessages();
 
+// Start the telegram bot
 bot.start(async (ctx) => {
   const [command, groupId] = ctx.payload.split("_");
 
@@ -210,13 +216,13 @@ bot.start(async (ctx) => {
       }),
     ];
 
-    if (tokens.length < 4)
+    if (tokens.length < maxTokensPerGroup)
       inline_keyboard.push([
         { text: "➕ Add New Token", callback_data: `add_${groupId}` },
       ]);
 
     await ctx.reply(
-      "*Active Tokens*\n\nTrack upto 4 tokens at once with @MeteoraWhaleBot",
+      `*Active Tokens*\n\nTrack upto ${maxTokensPerGroup} tokens at once with @MeteoraWhaleBot`,
       {
         reply_markup: {
           inline_keyboard,
@@ -345,9 +351,6 @@ bot.hears(/^(?!\/).*/, async (ctx) => {
     }
 
     let message = ctx.message.text;
-    if (message.startsWith("/")) {
-      return;
-    }
 
     await connectToDatabase();
     const userState = await UserState.findOne({ userId: ctx.from.id });
@@ -407,7 +410,7 @@ bot.hears(/^(?!\/).*/, async (ctx) => {
         });
         return;
       }
-      //get pool with highest liquidity
+      //Currently the pool address is used only to display the dexTools link
       const pool = tokenPools.reduce((prev: any, current: any) => {
         return prev.liquidity > current.liquidity ? prev : current;
       });
@@ -420,7 +423,7 @@ bot.hears(/^(?!\/).*/, async (ctx) => {
       }
 
       const minValue = 20;
-      const minValueEmojis = "🟢🟢";
+      const minValueEmojis = "🚀🚀";
 
       try {
         await Token.create({
@@ -511,36 +514,6 @@ bot.hears(/^(?!\/).*/, async (ctx) => {
   }
 });
 
-bot.command("config", async (ctx) => {
-  if (ctx.chat.type === "private") {
-    await ctx.reply("*This command can only be used in groups*", {
-      parse_mode: "Markdown",
-    });
-    return;
-  }
-  const groupId = ctx.chat.id;
-
-  await ctx.reply("*Click the button below to configure the bot*", {
-    reply_markup: {
-      inline_keyboard: [
-        [
-          {
-            text: "Configure Bot 🤖",
-            url: `https://t.me/${ctx.botInfo.username}?start=config_${groupId}`,
-          },
-        ],
-      ],
-    },
-    parse_mode: "Markdown",
-  });
-});
-
-bot.catch((err) => {
-  console.log("Error occurred", err);
-});
-
-bot.launch().then(() => console.log("Bot started!"));
-
 bot.command("setup", async (ctx) => {
   //if not a private message return
   if (ctx.chat.type !== "private") {
@@ -590,3 +563,33 @@ bot.command("setup", async (ctx) => {
     }
   );
 });
+
+bot.command("config", async (ctx) => {
+  if (ctx.chat.type === "private") {
+    await ctx.reply("*This command can only be used in groups*", {
+      parse_mode: "Markdown",
+    });
+    return;
+  }
+  const groupId = ctx.chat.id;
+
+  await ctx.reply("*Click the button below to configure the bot*", {
+    reply_markup: {
+      inline_keyboard: [
+        [
+          {
+            text: "Configure Bot 🤖",
+            url: `https://t.me/${ctx.botInfo.username}?start=config_${groupId}`,
+          },
+        ],
+      ],
+    },
+    parse_mode: "Markdown",
+  });
+});
+
+bot.catch((err) => {
+  console.log("Error occurred", err);
+});
+
+bot.launch().then(() => console.log("Bot started!"));
