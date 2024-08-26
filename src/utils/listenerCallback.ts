@@ -1,11 +1,12 @@
 import { BorshCoder } from "@project-serum/anchor";
-import { Connection, ParsedAccountData, PublicKey } from "@solana/web3.js";
+import { Connection, PublicKey } from "@solana/web3.js";
 import { configDotenv } from "dotenv";
 import { ammProgram, dlmmProgram, messageQueues, messageTimestamps } from "..";
 import { ammIDL, dlmmIDL } from "../idls";
 import Token from "../models/token";
 import TxnSignature from "../models/txnSignature";
 import connectToDatabase from "./database";
+import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
 configDotenv();
 
 const dexscreenerUrl = "https://dexscreener.com/solana/";
@@ -14,6 +15,18 @@ const txnUrl = "https://solscan.io/tx/";
 const buyerUrl = "https://solscan.io/account/";
 const dexTUrl = "https://www.dextools.io/app/en/solana/pair-explorer/";
 const solTrendingUrl = "https://t.me/SOLTRENDING";
+
+type Instruction = {
+  programId: string;
+  accounts: string[];
+  data: string;
+};
+
+type Swap = {
+  destination: string;
+  source: string;
+  amount: string;
+};
 
 //Fetch token price from jupipter or birdseye
 const getTokenPrice = async (tokenMint: string) => {
@@ -55,8 +68,6 @@ const getTokenPrice = async (tokenMint: string) => {
         throw new Error("SOL price found, token price not found");
       tokenPrice = tokenPriceResult.data[tokenMint].price;
     } catch (error: any) {
-      console.log("Fetching token price failed. Trying birdseye...");
-
       const options = {
         method: "GET",
         headers: { "X-API-KEY": process.env.BIRDSEYE_API_KEY! },
@@ -110,12 +121,6 @@ const getTotalSupply = async (tokenMint: string) => {
   }
 };
 
-type Instruction = {
-  programId: string;
-  accounts: string[];
-  data: string;
-};
-
 type InnerInstruction = {
   index: number;
   instructions: {
@@ -127,9 +132,9 @@ type InnerInstruction = {
         destination: string;
         mint: string;
         source: string;
-        amount?: string;
-        tokenAmount?: {
-          amount: number;
+        amount: string;
+        tokenAmount: {
+          amount: string;
           decimals: number;
           uiAmount: number;
           uiAmountString: string;
@@ -148,13 +153,7 @@ const handleDlmm = (
 ) => {
   const coder = new BorshCoder(dlmmIDL);
 
-  const swaps: Array<{
-    authority: string;
-    destination: string;
-    mint: string;
-    source: string;
-    amount: number;
-  }> = [];
+  const swaps: Array<Swap> = [];
 
   const processInnerInstructions = (
     innerInstructions: InnerInstruction[],
@@ -172,17 +171,19 @@ const handleDlmm = (
       j++
     ) {
       const ix = innerInstruction.instructions[j];
-      if (ix.parsed?.type !== "transferChecked" || !ix.parsed?.info) continue;
+      if (
+        ix.programId !== TOKEN_PROGRAM_ID.toBase58() ||
+        ix.parsed?.type !== "transferChecked" ||
+        !ix.parsed?.info
+      )
+        continue;
 
-      const { authority, destination, mint, source, tokenAmount } =
-        ix.parsed.info;
+      const { destination, source, tokenAmount } = ix.parsed.info;
 
       swaps.push({
-        authority,
         destination,
-        mint,
         source,
-        amount: tokenAmount!.uiAmount,
+        amount: tokenAmount!.amount,
       });
 
       transferCount++;
@@ -224,20 +225,18 @@ const handleDlmm = (
         stackHeight = ix.stackHeight + 1;
       } else {
         if (
+          ix.programId !== TOKEN_PROGRAM_ID.toBase58() ||
           ix.parsed?.type !== "transferChecked" ||
           ix.stackHeight !== stackHeight
         )
           continue;
 
-        const { authority, destination, mint, source, tokenAmount } =
-          ix.parsed.info;
+        const { destination, source, tokenAmount } = ix.parsed.info;
 
         swaps.push({
-          authority,
           destination,
-          mint,
           source,
-          amount: tokenAmount!.uiAmount,
+          amount: tokenAmount!.amount,
         });
 
         transferCount++;
@@ -252,37 +251,9 @@ const handleAmm = async (
   instructions: Instruction[],
   innerInstructions: InnerInstruction[]
 ) => {
-  const connection = new Connection(process.env.BACKEND_RPC!);
   const coder = new BorshCoder(ammIDL);
 
-  const swaps: Array<{
-    authority: string;
-    destination: string;
-    mint: string;
-    source: string;
-    amount: number;
-  }> = [];
-
-  const getTokenInfo = async (source: string, destination: string) => {
-    let accountInfo = await connection.getParsedAccountInfo(
-      new PublicKey(destination)
-    );
-
-    if (!accountInfo.value?.data) {
-      accountInfo = await connection.getParsedAccountInfo(
-        new PublicKey(source)
-      );
-    }
-    if (!accountInfo.value?.data) {
-      console.log("accountInfo", accountInfo);
-      throw new Error("Account info not found");
-    }
-
-    const { mint, tokenAmount } = (accountInfo.value.data as ParsedAccountData)
-      .parsed.info;
-
-    return { mint, decimals: tokenAmount.decimals };
-  };
+  const swaps: Array<Swap> = [];
 
   const processInnerInstructions = async (
     innerInstructions: InnerInstruction[],
@@ -307,15 +278,12 @@ const handleAmm = async (
       )
         continue;
 
-      const { authority, destination, source, amount } = ix.parsed.info;
-      const { mint, decimals } = await getTokenInfo(source, destination);
+      const { destination, source, amount } = ix.parsed.info;
 
       swaps.push({
-        authority,
         destination,
-        mint,
         source,
-        amount: parseInt(amount!) / 10 ** decimals,
+        amount,
       });
 
       transferCount++;
@@ -358,15 +326,12 @@ const handleAmm = async (
         if (ix.parsed?.type !== "transfer" || ix.stackHeight !== stackHeight)
           continue;
 
-        const { authority, destination, source, amount } = ix.parsed.info;
-        const { mint, decimals } = await getTokenInfo(source, destination);
+        const { destination, source, amount } = ix.parsed.info;
 
         swaps.push({
-          authority,
           destination,
-          mint,
           source,
-          amount: parseInt(amount!) / 10 ** decimals,
+          amount,
         });
 
         transferCount++;
@@ -408,6 +373,57 @@ const isMeteoraSwap = (logMessages: string[]) => {
   );
 };
 
+const getTokenChanges = (data: any) => {
+  const meta = data.transaction.meta;
+  const accountKeys = data.transaction.transaction.message.accountKeys;
+
+  const tokenChanges: Record<
+    string,
+    {
+      owner: string;
+      mint: string;
+      decimals: number;
+      isNewHolder: boolean;
+      amount: number;
+      initialAmount: number;
+    }
+  > = {};
+
+  const preTokenBalances = meta.preTokenBalances;
+  const postTokenBalances = meta.postTokenBalances;
+
+  for (let i = 0; i < postTokenBalances.length; i++) {
+    const postTokenBalance = postTokenBalances[i];
+    const preTokenBalance = preTokenBalances.find(
+      (t: any) => t.accountIndex === postTokenBalance.accountIndex
+    );
+
+    const tokenAccount = accountKeys[postTokenBalance.accountIndex].pubkey;
+    const mint = postTokenBalance.mint;
+    const owner = postTokenBalance.owner;
+    const decimals = postTokenBalance.uiTokenAmount.decimals;
+
+    const preTokenAmount = preTokenBalance?.uiTokenAmount?.uiAmount ?? 0;
+    const postTokenAmount = postTokenBalance.uiTokenAmount.uiAmount;
+
+    if (preTokenAmount >= postTokenAmount) continue;
+
+    const isNewHolder = preTokenAmount === 0;
+    const amount = postTokenAmount - preTokenAmount;
+
+    tokenChanges[tokenAccount] = {
+      owner,
+      mint,
+      decimals,
+      isNewHolder,
+      amount,
+      initialAmount: preTokenAmount,
+    };
+  }
+
+  return tokenChanges;
+};
+
 const callback = async (data: any) => {
   try {
     if (data.transaction.meta.err) return;
@@ -436,137 +452,119 @@ const callback = async (data: any) => {
       (acc: any) => acc.signer
     ).pubkey;
 
+    const tokenChanges = getTokenChanges(data);
+
     const userSwaps = await getSwaps(data.transaction).then((swaps) =>
-      swaps.filter((swap) => swap.authority !== signer)
-    );
-    if (userSwaps.length === 0) return;
+      swaps.reduce(
+        (acc, swap) => {
+          const { destination, amount } = swap;
 
-    //convert to map with toMint as key
-    const userSwapsMap = userSwaps.reduce(
-      (acc, swap) => {
-        acc[swap.mint] = swap;
-        return acc;
-      },
-      {} as Record<
-        string,
-        {
-          authority: string;
-          destination: string;
-          source: string;
+          if (!tokenChanges[destination]) return acc;
+
+          const { owner, decimals, mint, isNewHolder, initialAmount } =
+            tokenChanges[destination];
+
+          const uiAmount = parseInt(amount) / 10 ** decimals;
+
+          acc.push({
+            mint,
+            destination,
+            authority: owner,
+            uiAmount,
+            isNewHolder,
+            positionIncrease: initialAmount
+              ? ((uiAmount + initialAmount) * 100) / initialAmount
+              : 0,
+          });
+
+          return acc;
+        },
+        [] as Array<{
           mint: string;
-          amount: number;
-        }
-      >
+          destination: string;
+          authority: string;
+          uiAmount: number;
+          isNewHolder: boolean;
+          positionIncrease: number;
+        }>
+      )
     );
-
-    const tokenChanges: Record<
-      string,
-      { isNewHolder: boolean; amount: number; positionIncrease: number }
-    > = {};
-
-    const preTokenBalances = data.transaction.meta.preTokenBalances;
-    const postTokenBalances = data.transaction.meta.postTokenBalances;
-
-    for (let i = 0; i < postTokenBalances.length; i++) {
-      const postTokenBalance = postTokenBalances[i];
-      const preTokenBalance = preTokenBalances.find(
-        (t: any) => t.accountIndex === postTokenBalance.accountIndex
-      );
-
-      if (postTokenBalance.owner !== signer) continue;
-
-      const mint = postTokenBalance.mint;
-
-      const preTokenAmount = preTokenBalance?.uiTokenAmount?.uiAmount ?? 0;
-      const postTokenAmount = postTokenBalance.uiTokenAmount.uiAmount;
-
-      if (preTokenAmount >= postTokenAmount) continue;
-
-      const isNewHolder = preTokenAmount === 0;
-      const amount = postTokenAmount - preTokenAmount;
-      const positionIncrease = (amount * 100) / preTokenAmount;
-
-      tokenChanges[mint] = {
-        isNewHolder,
-        amount,
-        positionIncrease,
-      };
-    }
 
     const listeningGroups = await Token.find({
-      tokenMint: { $in: Object.keys(userSwapsMap) },
+      tokenMint: { $in: userSwaps.map((swap) => swap.mint) },
     }).lean();
 
     for (let i = 0; i < listeningGroups.length; i++) {
       const listeningGroup = listeningGroups[i];
       const tokenMint = listeningGroup.tokenMint;
 
-      const tokenChange = tokenChanges[tokenMint];
-      const swap = userSwapsMap[tokenMint];
+      const swaps = userSwaps.filter((swap) => swap.mint === tokenMint);
 
       const { tokenPrice, solPrice } = await getTokenPrice(tokenMint);
 
-      if (swap.amount * tokenPrice < listeningGroup.minValue) {
-        continue;
+      for (let j = 0; j < swaps.length; j++) {
+        const swap = swaps[j];
+
+        if (swap.uiAmount * tokenPrice < listeningGroup.minValue) {
+          continue;
+        }
+
+        const totalSupply = await getTotalSupply(tokenMint);
+        const marketCap = Math.floor(totalSupply * tokenPrice).toLocaleString();
+
+        let { groupId, image, name, symbol, minValue, emojis, poolAddress } =
+          listeningGroup;
+
+        // Stock image if no image is provided
+        image =
+          image ||
+          "https://static.vecteezy.com/system/resources/previews/006/153/238/original/solana-sol-logo-crypto-currency-purple-theme-background-neon-design-vector.jpg";
+
+        const amount = swap.uiAmount.toFixed(2);
+        const positionIncrease = swap.positionIncrease.toFixed(2);
+        const spentUsd = (swap.uiAmount * tokenPrice).toFixed(2);
+        const spentSol = (parseFloat(spentUsd) / solPrice).toFixed(2);
+
+        let caption =
+          `*${name.toUpperCase()} Buy!*\n` +
+          "__emojis__\n\n" +
+          `🔀 Spent *$${spentUsd} (${spentSol} SOL)*\n` +
+          `🔀 Got *${amount} ${symbol}*\n` +
+          `👤 [Buyer](${buyerUrl}${signer}) / [Txn](${txnUrl}${txnSignature})\n` +
+          `🪙 *${
+            swap.isNewHolder ? "New Holder" : `Position +${positionIncrease}%`
+          }*\n` +
+          `💸 Market Cap *$${marketCap}*\n\n` +
+          `[Screener](${dexscreenerUrl}${poolAddress}) |` +
+          ` [DexT](${dexTUrl}${poolAddress}) |` +
+          ` [Buy](${jupiterUrl}${tokenMint})`;
+
+        let remainingLength = 1024 - caption.length;
+        remainingLength -= remainingLength % emojis.length;
+
+        let totalEmojis = "";
+        const times = Math.min(
+          Math.floor(parseFloat(spentUsd) / minValue),
+          remainingLength / emojis.length
+        );
+        for (let i = 0; i < times; i++) totalEmojis += emojis;
+
+        caption = caption.replace("__emojis__", totalEmojis);
+
+        // Add to message queue of the respective group
+        if (!messageQueues[groupId]) {
+          messageQueues[groupId] = [];
+        }
+
+        if (!messageTimestamps[groupId]) {
+          messageTimestamps[groupId] = [];
+        }
+
+        messageQueues[groupId].push({
+          image,
+          caption,
+        });
       }
-
-      const totalSupply = await getTotalSupply(tokenMint);
-      const marketCap = Math.floor(totalSupply * tokenPrice).toLocaleString();
-
-      let { groupId, image, name, symbol, minValue, emojis, poolAddress } =
-        listeningGroup;
-
-      // Stock image if no image is provided
-      image =
-        image ||
-        "https://static.vecteezy.com/system/resources/previews/006/153/238/original/solana-sol-logo-crypto-currency-purple-theme-background-neon-design-vector.jpg";
-
-      const amount = swap.amount.toFixed(2);
-      const positionIncrease = tokenChange.positionIncrease.toFixed(2);
-      const spentUsd = (swap.amount * tokenPrice).toFixed(2);
-      const spentSol = (parseFloat(spentUsd) / solPrice).toFixed(2);
-
-      let caption =
-        `*${name.toUpperCase()} Buy!*\n` +
-        "__emojis__\n\n" +
-        `🔀 Spent *$${spentUsd} (${spentSol} SOL)*\n` +
-        `🔀 Got *${amount} ${symbol}*\n` +
-        `👤 [Buyer](${buyerUrl}${signer}) / [Txn](${txnUrl}${txnSignature})\n` +
-        `🪙 *${
-          tokenChange.isNewHolder
-            ? "New Holder"
-            : `Position +${positionIncrease}%`
-        }*\n` +
-        `💸 Market Cap *$${marketCap}*\n\n` +
-        `[Screener](${dexscreenerUrl}${poolAddress}) |` +
-        ` [DexT](${dexTUrl}${poolAddress}) |` +
-        ` [Buy](${jupiterUrl}${tokenMint})`;
-
-      let remainingLength = 1024 - caption.length;
-      remainingLength -= remainingLength % emojis.length;
-
-      let totalEmojis = "";
-      const times = Math.min(
-        Math.floor(parseFloat(spentUsd) / minValue),
-        remainingLength / emojis.length
-      );
-      for (let i = 0; i < times; i++) totalEmojis += emojis;
-
-      caption = caption.replace("__emojis__", totalEmojis);
-
-      // Add to message queue of the respective group
-      if (!messageQueues[groupId]) {
-        messageQueues[groupId] = [];
-      }
-
-      if (!messageTimestamps[groupId]) {
-        messageTimestamps[groupId] = [];
-      }
-
-      messageQueues[groupId].push({
-        image,
-        caption,
-      });
     }
     return;
   } catch (error: any) {
