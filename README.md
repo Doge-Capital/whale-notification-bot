@@ -42,4 +42,18 @@ yarn start
 4. Click on `Buy Amount` and enter the new minimum buy amount.
 5. Done! The bot will now only notify you if the swap amount is above the new minimum buy amount.
 
+## Database Migrations
+To create a new migration, run the following command:
+```bash
+npx migrate-mongo create <migration-name>
+```
+This will create a new migration file in the `migrations` folder, where required changes are to be specified. To run the migrations, use the following command:
+```bash
+npx migrate-mongo up
+```
+To rollback the migrations, use the following command:
+```bash
+npx migrate-mongo down
+```
+
 
