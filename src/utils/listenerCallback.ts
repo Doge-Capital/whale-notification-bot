@@ -1,6 +1,8 @@
-import { Connection, PublicKey } from "@solana/web3.js";
+import { BorshCoder } from "@project-serum/anchor";
+import { Connection, ParsedAccountData, PublicKey } from "@solana/web3.js";
 import { configDotenv } from "dotenv";
-import { messageQueues, messageTimestamps } from "..";
+import { ammProgram, dlmmProgram, messageQueues, messageTimestamps } from "..";
+import { ammIDL, dlmmIDL } from "../idls";
 import Token from "../models/token";
 import TxnSignature from "../models/txnSignature";
 import connectToDatabase from "./database";
@@ -108,6 +110,304 @@ const getTotalSupply = async (tokenMint: string) => {
   }
 };
 
+type Instruction = {
+  programId: string;
+  accounts: string[];
+  data: string;
+};
+
+type InnerInstruction = {
+  index: number;
+  instructions: {
+    program: string;
+    programId: string;
+    parsed?: {
+      info: {
+        authority: string;
+        destination: string;
+        mint: string;
+        source: string;
+        amount?: string;
+        tokenAmount?: {
+          amount: number;
+          decimals: number;
+          uiAmount: number;
+          uiAmountString: string;
+        };
+      };
+      type: string;
+    };
+    data?: string;
+    stackHeight: number;
+  }[];
+};
+
+const handleDlmm = (
+  instructions: Instruction[],
+  innerInstructions: InnerInstruction[]
+) => {
+  const coder = new BorshCoder(dlmmIDL);
+
+  const swaps: Array<{
+    authority: string;
+    destination: string;
+    mint: string;
+    source: string;
+    amount: number;
+  }> = [];
+
+  const processInnerInstructions = (
+    innerInstructions: InnerInstruction[],
+    index: number
+  ) => {
+    const innerInstruction = innerInstructions.find(
+      (innerInstruction) => innerInstruction.index === index
+    );
+
+    if (!innerInstruction) return;
+
+    for (
+      let j = 0, transferCount = 0;
+      j < innerInstruction.instructions.length && transferCount < 2;
+      j++
+    ) {
+      const ix = innerInstruction.instructions[j];
+      if (ix.parsed?.type !== "transferChecked" || !ix.parsed?.info) continue;
+
+      const { authority, destination, mint, source, tokenAmount } =
+        ix.parsed.info;
+
+      swaps.push({
+        authority,
+        destination,
+        mint,
+        source,
+        amount: tokenAmount!.uiAmount,
+      });
+
+      transferCount++;
+    }
+  };
+
+  for (let i = 0; i < instructions.length; i++) {
+    const instruction = instructions[i];
+
+    if (instruction.programId !== dlmmProgram) continue;
+
+    const decodedIx = coder.instruction.decode(instruction.data, "base58");
+
+    if (decodedIx?.name !== "swap") continue;
+
+    processInnerInstructions(innerInstructions, i);
+  }
+
+  for (let i = 0; i < innerInstructions.length; i++) {
+    const innerInstruction = innerInstructions[i];
+    const ixs = innerInstruction.instructions;
+
+    let isSwap = false;
+    let stackHeight = 0;
+
+    for (
+      let j = 0, transferCount = 0;
+      j < ixs.length && transferCount < 2;
+      j++
+    ) {
+      const ix = ixs[j];
+
+      if (!isSwap) {
+        if (ix.programId !== dlmmProgram || !ix.data) continue;
+
+        const decodedIx = coder.instruction.decode(ix.data, "base58");
+        if (decodedIx?.name !== "swap") continue;
+        isSwap = true;
+        stackHeight = ix.stackHeight + 1;
+      } else {
+        if (
+          ix.parsed?.type !== "transferChecked" ||
+          ix.stackHeight !== stackHeight
+        )
+          continue;
+
+        const { authority, destination, mint, source, tokenAmount } =
+          ix.parsed.info;
+
+        swaps.push({
+          authority,
+          destination,
+          mint,
+          source,
+          amount: tokenAmount!.uiAmount,
+        });
+
+        transferCount++;
+      }
+    }
+  }
+
+  return swaps;
+};
+
+const handleAmm = async (
+  instructions: Instruction[],
+  innerInstructions: InnerInstruction[]
+) => {
+  const connection = new Connection(process.env.BACKEND_RPC!);
+  const coder = new BorshCoder(ammIDL);
+
+  const swaps: Array<{
+    authority: string;
+    destination: string;
+    mint: string;
+    source: string;
+    amount: number;
+  }> = [];
+
+  const getTokenInfo = async (source: string, destination: string) => {
+    let accountInfo = await connection.getParsedAccountInfo(
+      new PublicKey(destination)
+    );
+
+    if (!accountInfo.value?.data) {
+      accountInfo = await connection.getParsedAccountInfo(
+        new PublicKey(source)
+      );
+    }
+    if (!accountInfo.value?.data) {
+      console.log("accountInfo", accountInfo);
+      throw new Error("Account info not found");
+    }
+
+    const { mint, tokenAmount } = (accountInfo.value.data as ParsedAccountData)
+      .parsed.info;
+
+    return { mint, decimals: tokenAmount.decimals };
+  };
+
+  const processInnerInstructions = async (
+    innerInstructions: InnerInstruction[],
+    index: number,
+    stackHeightOffset: number
+  ) => {
+    const innerInstruction = innerInstructions.find(
+      (innerInstruction) => innerInstruction.index === index
+    );
+
+    if (!innerInstruction) return;
+
+    for (
+      let j = 0, transferCount = 0;
+      j < innerInstruction.instructions.length && transferCount < 2;
+      j++
+    ) {
+      const ix = innerInstruction.instructions[j];
+      if (
+        ix.parsed?.type !== "transfer" ||
+        ix.stackHeight !== stackHeightOffset
+      )
+        continue;
+
+      const { authority, destination, source, amount } = ix.parsed.info;
+      const { mint, decimals } = await getTokenInfo(source, destination);
+
+      swaps.push({
+        authority,
+        destination,
+        mint,
+        source,
+        amount: parseInt(amount!) / 10 ** decimals,
+      });
+
+      transferCount++;
+    }
+  };
+
+  for (let i = 0; i < instructions.length; i++) {
+    const instruction = instructions[i];
+
+    if (instruction.programId !== ammProgram) continue;
+
+    const decodedIx = coder.instruction.decode(instruction.data, "base58");
+    if (decodedIx?.name !== "swap") continue;
+
+    await processInnerInstructions(innerInstructions, i, 3);
+  }
+
+  for (let i = 0; i < innerInstructions.length; i++) {
+    const innerInstruction = innerInstructions[i];
+    const ixs = innerInstruction.instructions;
+
+    let isSwap = false;
+    let stackHeight = 0;
+
+    for (
+      let j = 0, transferCount = 0;
+      j < ixs.length && transferCount < 2;
+      j++
+    ) {
+      const ix = ixs[j];
+
+      if (!isSwap) {
+        if (ix.programId !== ammProgram || !ix.data) continue;
+
+        const decodedIx = coder.instruction.decode(ix.data, "base58");
+        if (decodedIx?.name !== "swap") continue;
+        isSwap = true;
+        stackHeight = ix.stackHeight + 2;
+      } else {
+        if (ix.parsed?.type !== "transfer" || ix.stackHeight !== stackHeight)
+          continue;
+
+        const { authority, destination, source, amount } = ix.parsed.info;
+        const { mint, decimals } = await getTokenInfo(source, destination);
+
+        swaps.push({
+          authority,
+          destination,
+          mint,
+          source,
+          amount: parseInt(amount!) / 10 ** decimals,
+        });
+
+        transferCount++;
+      }
+    }
+  }
+
+  return swaps;
+};
+
+const getSwaps = async (transaction: any) => {
+  try {
+    const instructions = transaction.transaction.message.instructions;
+    const innerInstructions = transaction.meta.innerInstructions;
+
+    const lbClmmSwaps = handleDlmm(instructions, innerInstructions);
+
+    // Usage for handleAmm
+    const ammSwaps = await handleAmm(instructions, innerInstructions);
+
+    return [...lbClmmSwaps, ...ammSwaps];
+  } catch (error: any) {
+    console.log("Error in getSwaps", error.message);
+    return [];
+  }
+};
+
+const isMeteoraSwap = (logMessages: string[]) => {
+  return logMessages.some(
+    (message, index) =>
+      index > 0 &&
+      (logMessages[index - 1].includes(
+        "Program LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo invoke"
+      ) ||
+        logMessages[index - 1].includes(
+          "Program Eo7WjKq67rjJQSZxS6z3YkapzY3eMj6Xy8X5EQVn5UaB invoke"
+        )) &&
+      message === "Program log: Instruction: Swap"
+  );
+};
+
 const callback = async (data: any) => {
   try {
     if (data.transaction.meta.err) return;
@@ -123,8 +423,10 @@ const callback = async (data: any) => {
     }
 
     const logMessages: string[] = data.transaction.meta.logMessages;
-    // Consider only swap transactions from meteora
-    if (!logMessages.some((log) => log.includes("Instruction: Swap"))) return;
+
+    // Just a preliminary check to see if it's a Meteora swap
+    const meteoraSwapFound = isMeteoraSwap(logMessages);
+    if (!meteoraSwapFound) return;
 
     if (!data.transaction.transaction) {
       console.log("data.transaction.transaction not found", data);
@@ -133,6 +435,29 @@ const callback = async (data: any) => {
     const signer = data.transaction.transaction.message.accountKeys.find(
       (acc: any) => acc.signer
     ).pubkey;
+
+    const userSwaps = await getSwaps(data.transaction).then((swaps) =>
+      swaps.filter((swap) => swap.authority !== signer)
+    );
+    if (userSwaps.length === 0) return;
+
+    //convert to map with toMint as key
+    const userSwapsMap = userSwaps.reduce(
+      (acc, swap) => {
+        acc[swap.mint] = swap;
+        return acc;
+      },
+      {} as Record<
+        string,
+        {
+          authority: string;
+          destination: string;
+          source: string;
+          mint: string;
+          amount: number;
+        }
+      >
+    );
 
     const tokenChanges: Record<
       string,
@@ -169,17 +494,19 @@ const callback = async (data: any) => {
     }
 
     const listeningGroups = await Token.find({
-      tokenMint: { $in: Object.keys(tokenChanges) },
+      tokenMint: { $in: Object.keys(userSwapsMap) },
     }).lean();
 
     for (let i = 0; i < listeningGroups.length; i++) {
       const listeningGroup = listeningGroups[i];
       const tokenMint = listeningGroup.tokenMint;
+
       const tokenChange = tokenChanges[tokenMint];
+      const swap = userSwapsMap[tokenMint];
 
       const { tokenPrice, solPrice } = await getTokenPrice(tokenMint);
 
-      if (tokenChange.amount * tokenPrice < listeningGroup.minValue) {
+      if (swap.amount * tokenPrice < listeningGroup.minValue) {
         continue;
       }
 
@@ -194,9 +521,9 @@ const callback = async (data: any) => {
         image ||
         "https://static.vecteezy.com/system/resources/previews/006/153/238/original/solana-sol-logo-crypto-currency-purple-theme-background-neon-design-vector.jpg";
 
-      const amount = tokenChange.amount.toFixed(2);
+      const amount = swap.amount.toFixed(2);
       const positionIncrease = tokenChange.positionIncrease.toFixed(2);
-      const spentUsd = (tokenChange.amount * tokenPrice).toFixed(2);
+      const spentUsd = (swap.amount * tokenPrice).toFixed(2);
       const spentSol = (parseFloat(spentUsd) / solPrice).toFixed(2);
 
       let caption =

@@ -12,6 +12,9 @@ import UserState from "./models/userState";
 
 configDotenv();
 
+export const dlmmProgram = "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo";
+export const ammProgram = "Eo7WjKq67rjJQSZxS6z3YkapzY3eMj6Xy8X5EQVn5UaB";
+
 const bot = new Telegraf(process.env.BOT_TOKEN!);
 
 const apiKey = process.env.HELIUS_API_KEY;
@@ -36,10 +39,7 @@ function initializeWebSocket() {
       params: [
         {
           //Meteora Pools
-          accountInclude: [
-            "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo",
-            "Eo7WjKq67rjJQSZxS6z3YkapzY3eMj6Xy8X5EQVn5UaB",
-          ],
+          accountInclude: [dlmmProgram, ammProgram],
         },
         {
           vote: false,
@@ -59,7 +59,6 @@ function initializeWebSocket() {
     pingInterval = setInterval(() => {
       if (ws.readyState === WebSocket.OPEN) {
         ws.ping();
-        console.log("Ping sent");
 
         pongTimeout = setTimeout(() => {
           console.log("Pong not received in time, closing connection");
@@ -108,7 +107,6 @@ function initializeWebSocket() {
   });
 
   ws.on("pong", function pong() {
-    console.log("Pong received");
     clearTimeout(pongTimeout);
   });
 

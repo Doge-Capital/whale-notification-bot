@@ -5,6 +5,7 @@
   "license": "MIT",
   "dependencies": {
     "@metaplex-foundation/js": "^0.20.1",
+    "@project-serum/anchor": "^0.26.0",
     "@solana/spl-token": "^0.4.8",
     "@solana/web3.js": "^1.95.1",
     "@types/express": "^4.17.21",
