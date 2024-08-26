@@ -14,6 +14,7 @@ configDotenv();
 
 export const dlmmProgram = "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo";
 export const ammProgram = "Eo7WjKq67rjJQSZxS6z3YkapzY3eMj6Xy8X5EQVn5UaB";
+export const vaultProgram = "24Uqj9JCLxUeoC3hGfh5W3s9FM9uCHDS2SG3LYwBpyTi";
 
 const bot = new Telegraf(process.env.BOT_TOKEN!);
 

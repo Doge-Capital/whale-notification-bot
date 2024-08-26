@@ -1,12 +1,17 @@
 import { BorshCoder } from "@project-serum/anchor";
 import { Connection, PublicKey } from "@solana/web3.js";
 import { configDotenv } from "dotenv";
-import { ammProgram, dlmmProgram, messageQueues, messageTimestamps } from "..";
+import {
+  ammProgram,
+  dlmmProgram,
+  messageQueues,
+  messageTimestamps,
+  vaultProgram,
+} from "..";
 import { ammIDL, dlmmIDL } from "../idls";
 import Token from "../models/token";
 import TxnSignature from "../models/txnSignature";
 import connectToDatabase from "./database";
-import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
 configDotenv();
 
 const dexscreenerUrl = "https://dexscreener.com/solana/";
@@ -147,6 +152,16 @@ type InnerInstruction = {
   }[];
 };
 
+const insertTransfer = (swaps: Array<Swap>, ix: any) => {
+  const { destination, source, tokenAmount, amount } = ix.parsed!.info;
+
+  swaps.push({
+    destination,
+    source,
+    amount: tokenAmount?.amount ?? amount,
+  });
+};
+
 const handleDlmm = (
   instructions: Instruction[],
   innerInstructions: InnerInstruction[]
@@ -154,41 +169,6 @@ const handleDlmm = (
   const coder = new BorshCoder(dlmmIDL);
 
   const swaps: Array<Swap> = [];
-
-  const processInnerInstructions = (
-    innerInstructions: InnerInstruction[],
-    index: number
-  ) => {
-    const innerInstruction = innerInstructions.find(
-      (innerInstruction) => innerInstruction.index === index
-    );
-
-    if (!innerInstruction) return;
-
-    for (
-      let j = 0, transferCount = 0;
-      j < innerInstruction.instructions.length && transferCount < 2;
-      j++
-    ) {
-      const ix = innerInstruction.instructions[j];
-      if (
-        ix.programId !== TOKEN_PROGRAM_ID.toBase58() ||
-        ix.parsed?.type !== "transferChecked" ||
-        !ix.parsed?.info
-      )
-        continue;
-
-      const { destination, source, tokenAmount } = ix.parsed.info;
-
-      swaps.push({
-        destination,
-        source,
-        amount: tokenAmount!.amount,
-      });
-
-      transferCount++;
-    }
-  };
 
   for (let i = 0; i < instructions.length; i++) {
     const instruction = instructions[i];
@@ -199,48 +179,32 @@ const handleDlmm = (
 
     if (decodedIx?.name !== "swap") continue;
 
-    processInnerInstructions(innerInstructions, i);
+    const innerInstruction = innerInstructions.find(
+      (innerInstruction) => innerInstruction.index === i
+    );
+
+    if (!innerInstruction) continue;
+
+    insertTransfer(swaps, innerInstruction.instructions[0]);
+    insertTransfer(swaps, innerInstruction.instructions[1]);
   }
 
   for (let i = 0; i < innerInstructions.length; i++) {
     const innerInstruction = innerInstructions[i];
     const ixs = innerInstruction.instructions;
 
-    let isSwap = false;
-    let stackHeight = 0;
-
-    for (
-      let j = 0, transferCount = 0;
-      j < ixs.length && transferCount < 2;
-      j++
-    ) {
+    for (let j = 0; j < ixs.length; j++) {
       const ix = ixs[j];
 
-      if (!isSwap) {
-        if (ix.programId !== dlmmProgram || !ix.data) continue;
+      if (ix.programId !== dlmmProgram || !ix.data) continue;
 
-        const decodedIx = coder.instruction.decode(ix.data, "base58");
-        if (decodedIx?.name !== "swap") continue;
-        isSwap = true;
-        stackHeight = ix.stackHeight + 1;
-      } else {
-        if (
-          ix.programId !== TOKEN_PROGRAM_ID.toBase58() ||
-          ix.parsed?.type !== "transferChecked" ||
-          ix.stackHeight !== stackHeight
-        )
-          continue;
+      const decodedIx = coder.instruction.decode(ix.data, "base58");
+      if (decodedIx?.name !== "swap") continue;
 
-        const { destination, source, tokenAmount } = ix.parsed.info;
+      insertTransfer(swaps, ixs[j + 1]);
+      insertTransfer(swaps, ixs[j + 2]);
 
-        swaps.push({
-          destination,
-          source,
-          amount: tokenAmount!.amount,
-        });
-
-        transferCount++;
-      }
+      j += 2;
     }
   }
 
@@ -255,41 +219,6 @@ const handleAmm = async (
 
   const swaps: Array<Swap> = [];
 
-  const processInnerInstructions = async (
-    innerInstructions: InnerInstruction[],
-    index: number,
-    stackHeightOffset: number
-  ) => {
-    const innerInstruction = innerInstructions.find(
-      (innerInstruction) => innerInstruction.index === index
-    );
-
-    if (!innerInstruction) return;
-
-    for (
-      let j = 0, transferCount = 0;
-      j < innerInstruction.instructions.length && transferCount < 2;
-      j++
-    ) {
-      const ix = innerInstruction.instructions[j];
-      if (
-        ix.parsed?.type !== "transfer" ||
-        ix.stackHeight !== stackHeightOffset
-      )
-        continue;
-
-      const { destination, source, amount } = ix.parsed.info;
-
-      swaps.push({
-        destination,
-        source,
-        amount,
-      });
-
-      transferCount++;
-    }
-  };
-
   for (let i = 0; i < instructions.length; i++) {
     const instruction = instructions[i];
 
@@ -298,44 +227,38 @@ const handleAmm = async (
     const decodedIx = coder.instruction.decode(instruction.data, "base58");
     if (decodedIx?.name !== "swap") continue;
 
-    await processInnerInstructions(innerInstructions, i, 3);
+    const innerInstruction = innerInstructions.find(
+      (innerInstruction) => innerInstruction.index === i
+    );
+
+    if (!innerInstruction) continue;
+
+    let j = 0;
+
+    if (innerInstruction.instructions[j].programId !== vaultProgram) ++j;
+
+    insertTransfer(swaps, innerInstruction.instructions[j + 1]);
+    insertTransfer(swaps, innerInstruction.instructions[j + 4]);
   }
 
   for (let i = 0; i < innerInstructions.length; i++) {
     const innerInstruction = innerInstructions[i];
     const ixs = innerInstruction.instructions;
 
-    let isSwap = false;
-    let stackHeight = 0;
-
-    for (
-      let j = 0, transferCount = 0;
-      j < ixs.length && transferCount < 2;
-      j++
-    ) {
+    for (let j = 0; j < ixs.length; j++) {
       const ix = ixs[j];
 
-      if (!isSwap) {
-        if (ix.programId !== ammProgram || !ix.data) continue;
+      if (ix.programId !== ammProgram || !ix.data) continue;
 
-        const decodedIx = coder.instruction.decode(ix.data, "base58");
-        if (decodedIx?.name !== "swap") continue;
-        isSwap = true;
-        stackHeight = ix.stackHeight + 2;
-      } else {
-        if (ix.parsed?.type !== "transfer" || ix.stackHeight !== stackHeight)
-          continue;
+      const decodedIx = coder.instruction.decode(ix.data, "base58");
+      if (decodedIx?.name !== "swap") continue;
 
-        const { destination, source, amount } = ix.parsed.info;
+      if (ixs[j + 1].programId !== vaultProgram) j += 1;
 
-        swaps.push({
-          destination,
-          source,
-          amount,
-        });
+      insertTransfer(swaps, ixs[j + 2]);
+      insertTransfer(swaps, ixs[j + 5]);
 
-        transferCount++;
-      }
+      j += 4;
     }
   }
 
@@ -347,12 +270,12 @@ const getSwaps = async (transaction: any) => {
     const instructions = transaction.transaction.message.instructions;
     const innerInstructions = transaction.meta.innerInstructions;
 
-    const lbClmmSwaps = handleDlmm(instructions, innerInstructions);
+    const dlmmSwaps = handleDlmm(instructions, innerInstructions);
 
     // Usage for handleAmm
     const ammSwaps = await handleAmm(instructions, innerInstructions);
 
-    return [...lbClmmSwaps, ...ammSwaps];
+    return [...dlmmSwaps, ...ammSwaps];
   } catch (error: any) {
     console.log("Error in getSwaps", error.message);
     return [];
@@ -392,34 +315,61 @@ const getTokenChanges = (data: any) => {
   const preTokenBalances = meta.preTokenBalances;
   const postTokenBalances = meta.postTokenBalances;
 
-  for (let i = 0; i < postTokenBalances.length; i++) {
-    const postTokenBalance = postTokenBalances[i];
-    const preTokenBalance = preTokenBalances.find(
-      (t: any) => t.accountIndex === postTokenBalance.accountIndex
-    );
+  const processTokenBalances = (
+    tokenBalances: any[],
+    comparisonBalances: any[],
+    accountKeys: any[],
+    tokenChanges: any,
+    isPostBalances: boolean
+  ) => {
+    for (let i = 0; i < tokenBalances.length; i++) {
+      const tokenBalance = tokenBalances[i];
+      const comparisonBalance = comparisonBalances.find(
+        (t: any) => t.accountIndex === tokenBalance.accountIndex
+      );
 
-    const tokenAccount = accountKeys[postTokenBalance.accountIndex].pubkey;
-    const mint = postTokenBalance.mint;
-    const owner = postTokenBalance.owner;
-    const decimals = postTokenBalance.uiTokenAmount.decimals;
+      const tokenAccount = accountKeys[tokenBalance.accountIndex].pubkey;
+      const mint = tokenBalance.mint;
+      const owner = tokenBalance.owner;
+      const decimals = tokenBalance.uiTokenAmount.decimals;
 
-    const preTokenAmount = preTokenBalance?.uiTokenAmount?.uiAmount ?? 0;
-    const postTokenAmount = postTokenBalance.uiTokenAmount.uiAmount;
+      const preTokenAmount = isPostBalances
+        ? comparisonBalance?.uiTokenAmount?.uiAmount ?? 0
+        : tokenBalance?.uiTokenAmount?.uiAmount;
+      const postTokenAmount = isPostBalances
+        ? tokenBalance.uiTokenAmount.uiAmount
+        : 0;
 
-    if (preTokenAmount >= postTokenAmount) continue;
+      if (preTokenAmount > postTokenAmount) continue;
 
-    const isNewHolder = preTokenAmount === 0;
-    const amount = postTokenAmount - preTokenAmount;
+      const isNewHolder = preTokenAmount === 0;
+      const amount = postTokenAmount - preTokenAmount;
 
-    tokenChanges[tokenAccount] = {
-      owner,
-      mint,
-      decimals,
-      isNewHolder,
-      amount,
-      initialAmount: preTokenAmount,
-    };
-  }
+      tokenChanges[tokenAccount] = {
+        owner,
+        mint,
+        decimals,
+        isNewHolder,
+        amount,
+        initialAmount: preTokenAmount,
+      };
+    }
+  };
+
+  processTokenBalances(
+    postTokenBalances,
+    preTokenBalances,
+    accountKeys,
+    tokenChanges,
+    true
+  );
+  processTokenBalances(
+    preTokenBalances,
+    postTokenBalances,
+    accountKeys,
+    tokenChanges,
+    false
+  );
 
   return tokenChanges;
 };
@@ -454,8 +404,8 @@ const callback = async (data: any) => {
 
     const tokenChanges = getTokenChanges(data);
 
-    const userSwaps = await getSwaps(data.transaction).then((swaps) =>
-      swaps.reduce(
+    const userSwaps = await getSwaps(data.transaction).then((swaps) => {
+      return swaps.reduce(
         (acc, swap) => {
           const { destination, amount } = swap;
 
@@ -487,8 +437,8 @@ const callback = async (data: any) => {
           isNewHolder: boolean;
           positionIncrease: number;
         }>
-      )
-    );
+      );
+    });
 
     const listeningGroups = await Token.find({
       tokenMint: { $in: userSwaps.map((swap) => swap.mint) },
