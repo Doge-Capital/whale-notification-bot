@@ -148,6 +148,7 @@ type InnerInstruction = {
       type: string;
     };
     data?: string;
+    accounts: string[];
     stackHeight: number;
   }[];
 };
@@ -170,6 +171,11 @@ const handleDlmm = (
 
   const swaps: Array<Swap> = [];
 
+  const isHostFeeAccPresent = (accounts: string[]) => {
+    if (accounts.length < 10) return false;
+    return accounts[9] !== dlmmProgram;
+  };
+
   for (let i = 0; i < instructions.length; i++) {
     const instruction = instructions[i];
 
@@ -185,8 +191,10 @@ const handleDlmm = (
 
     if (!innerInstruction) continue;
 
-    insertTransfer(swaps, innerInstruction.instructions[0]);
-    insertTransfer(swaps, innerInstruction.instructions[1]);
+    let swapIndex = isHostFeeAccPresent(instruction.accounts) ? 1 : 0;
+
+    insertTransfer(swaps, innerInstruction.instructions[swapIndex++]);
+    insertTransfer(swaps, innerInstruction.instructions[swapIndex]);
   }
 
   for (let i = 0; i < innerInstructions.length; i++) {
@@ -201,10 +209,10 @@ const handleDlmm = (
       const decodedIx = coder.instruction.decode(ix.data, "base58");
       if (decodedIx?.name !== "swap") continue;
 
-      insertTransfer(swaps, ixs[j + 1]);
-      insertTransfer(swaps, ixs[j + 2]);
+      let swapIndex = isHostFeeAccPresent(ix.accounts) ? 2 : 1;
 
-      j += 2;
+      insertTransfer(swaps, ixs[j + swapIndex++]);
+      insertTransfer(swaps, ixs[j + swapIndex]);
     }
   }
 
