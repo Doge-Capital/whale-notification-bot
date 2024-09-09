@@ -18,6 +18,9 @@
     "telegraf": "^4.16.3"
   },
   "scripts": {
-    "start": "npx ts-node src/index.ts"
+    "start": "npx ts-node src/index.ts",
+    "migrate:create": "npx migrate-mongo create -f src/migration-config.js",
+    "migrate:up": "npx migrate-mongo up -f src/migration-config.js",
+    "migrate:down": "npx migrate-mongo down -f src/migration-config.js"
   }
 }
